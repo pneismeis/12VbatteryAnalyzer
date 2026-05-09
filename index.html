@@ -576,8 +576,25 @@ const App = {
       return;
     }
 
-    const latest = this.manifest.months[this.manifest.months.length - 1];
-    await this.switchMonth(latest.month);
+    const params = new URLSearchParams(location.search);
+    if (params.get('view') === 'overview') {
+      await this.showOverview(true);
+    } else {
+      const monthParam = params.get('m');
+      const target = (monthParam && this.manifest.months.find(m => m.month === monthParam))
+        ? monthParam
+        : this.manifest.months[this.manifest.months.length - 1].month;
+      await this.switchMonth(target, true);
+    }
+
+    window.addEventListener('popstate', e => {
+      const p = new URLSearchParams(location.search);
+      if (p.get('view') === 'overview') this.showOverview(true);
+      else {
+        const m = p.get('m') || this.manifest.months[this.manifest.months.length - 1].month;
+        this.switchMonth(m, true);
+      }
+    });
   },
 
   mergeLocalMonths() {
@@ -611,11 +628,12 @@ const App = {
     });
   },
 
-  async switchMonth(monthKey) {
+  async switchMonth(monthKey, fromHistory = false) {
     this.currentMonth = monthKey;
     this.showOverviewFlag = false;
     this.renderTabs();
     document.getElementById('overviewTab').classList.remove('active');
+    if (!fromHistory) history.pushState({}, '', `?m=${monthKey}`);
 
     document.getElementById('loadingState').style.display = 'flex';
     document.getElementById('monthView').style.display = 'none';
@@ -939,10 +957,11 @@ const App = {
     });
   },
 
-  async showOverview() {
+  async showOverview(fromHistory = false) {
     this.showOverviewFlag = true;
     document.getElementById('overviewTab').classList.add('active');
     document.querySelectorAll('[data-month]').forEach(b => b.classList.remove('active'));
+    if (!fromHistory) history.pushState({}, '', '?view=overview');
     document.getElementById('loadingState').style.display = 'flex';
     document.getElementById('monthView').style.display = 'none';
     document.getElementById('overviewView').style.display = 'none';
