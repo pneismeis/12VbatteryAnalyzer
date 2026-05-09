@@ -1,0 +1,15 @@
+# XLS source files (convert with convert.py, don't commit raw files)
+*.xls
+*.xlsx
+
+# LibreOffice temp files
+.~lock.*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
