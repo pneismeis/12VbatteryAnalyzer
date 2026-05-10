@@ -721,10 +721,17 @@ const App = {
 
     window.addEventListener('popstate', e => {
       const p = new URLSearchParams(location.search);
-      if (p.get('view') === 'overview') this.showOverview(true);
-      else {
+      if (p.get('view') === 'overview') {
+        this.showOverview(true);
+      } else {
         const m = p.get('m') || this.manifest.months[this.manifest.months.length - 1].month;
-        this.switchMonth(m, true);
+        const tab = p.get('tab');
+        if (m === this.currentMonth && tab) {
+          // same month, just switch inner tab
+          this.switchInnerTab(tab, true);
+        } else {
+          this.switchMonth(m, true);
+        }
       }
     });
   },
@@ -765,7 +772,13 @@ const App = {
     this.showOverviewFlag = false;
     this.renderTabs();
     document.getElementById('overviewTab').classList.remove('active');
-    if (!fromHistory) history.pushState({}, '', `?m=${monthKey}`);
+    if (!fromHistory) {
+      const p = new URLSearchParams(location.search);
+      p.set('m', monthKey); p.delete('view');
+      // keep current inner tab in URL if not resetting
+      if (!p.get('tab')) p.delete('tab');
+      history.pushState({}, '', '?' + p.toString());
+    }
 
     document.getElementById('loadingState').style.display = 'flex';
     document.getElementById('monthView').style.display = 'none';
@@ -777,6 +790,8 @@ const App = {
     document.getElementById('loadingState').style.display = 'none';
     document.getElementById('monthView').style.display = 'block';
     this.render(data);
+    const tab = new URLSearchParams(location.search).get('tab');
+    if (tab && tab !== 'uebersicht') this.switchInnerTab(tab, true);
   },
 
   async loadMonth(key) {
@@ -809,7 +824,7 @@ const App = {
     this.tabsRendered['uebersicht'] = true;
   },
 
-  switchInnerTab(tabId) {
+  switchInnerTab(tabId, fromHistory = false) {
     const data = this.monthData[this.currentMonth];
     if (!data) return;
     ['uebersicht','nacht','ruhetage','tiefen','ereignisse'].forEach(t => {
@@ -818,6 +833,11 @@ const App = {
       if (btn) btn.classList.toggle('active', t===tabId);
     });
     this.innerTab = tabId;
+    if (!fromHistory) {
+      const p = new URLSearchParams(location.search);
+      p.set('tab', tabId);
+      history.pushState({}, '', '?' + p.toString());
+    }
     if (!this.tabsRendered[tabId]) {
       if (tabId==='nacht') this.renderNacht(data);
       else if (tabId==='ruhetage') this.renderRuhetage(data);
