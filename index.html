@@ -738,7 +738,15 @@ function stddev(arr){if(arr.length<2)return 0;const m=avg(arr);return Math.sqrt(
 function pearson(xs,ys){const n=xs.length;if(n<2)return 0;const mx=avg(xs),my=avg(ys);const num=xs.reduce((s,x,i)=>s+(x-mx)*(ys[i]-my),0);const den=Math.sqrt(xs.reduce((s,x)=>s+(x-mx)**2,0)*ys.reduce((s,y)=>s+(y-my)**2,0));return den?round(num/den,3):0;}
 // AGM/EFB thresholds for VW ID.3 12V battery (resting voltage only)
 const V_COLOR=v=>v>=12.8?'#10b981':v>=12.62?'#34d399':v>=12.50?'#84cc16':v>=12.37?'#f59e0b':v>=12.24?'#fb923c':v>=12.10?'#ef4444':v>=11.96?'#dc2626':'#991b1b';
-const V_LABEL=v=>v>=12.8?'Sehr gut (100%)':v>=12.62?'Gut (80%)':v>=12.50?'OK (70%)':v>=12.37?'Niedrig (60%)':v>=12.24?'Entladen (50%)':v>=12.10?'Kritisch (40%)':v>=11.96?'Tiefentladung (30%)':'Leer (<30%)';
+// Linear interpolation between known voltage→SoC breakpoints
+const V_SOC_PTS=[[11.96,30],[12.10,40],[12.24,50],[12.37,60],[12.50,70],[12.62,80],[12.80,100]];
+function V_TO_SOC(v){
+  if(v>=V_SOC_PTS[V_SOC_PTS.length-1][0])return 100;
+  if(v<=V_SOC_PTS[0][0]){const s=(V_SOC_PTS[1][1]-V_SOC_PTS[0][1])/(V_SOC_PTS[1][0]-V_SOC_PTS[0][0]);return round(Math.max(0,V_SOC_PTS[0][1]+s*(v-V_SOC_PTS[0][0])),1);}
+  for(let i=1;i<V_SOC_PTS.length;i++){if(v<=V_SOC_PTS[i][0]){const[v0,s0]=V_SOC_PTS[i-1],[v1,s1]=V_SOC_PTS[i];return round(s0+(v-v0)/(v1-v0)*(s1-s0),1);}}
+  return 100;
+}
+const V_LABEL=v=>{const name=v>=12.8?'Sehr gut':v>=12.62?'Gut':v>=12.50?'OK':v>=12.37?'Niedrig':v>=12.24?'Entladen':v>=12.10?'Kritisch':v>=11.96?'Tiefentladung':'Leer';return `${name} (~${V_TO_SOC(v).toFixed(1)}%)`;}
 // SoC% → color, consistent with voltage table above
 const SOC_COLOR=s=>s>=80?'#10b981':s>=70?'#34d399':s>=60?'#84cc16':s>=50?'#f59e0b':s>=40?'#fb923c':s>=30?'#ef4444':'#dc2626';
 
