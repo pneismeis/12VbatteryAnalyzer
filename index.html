@@ -483,9 +483,24 @@
 
     <div id="itabContent-entlade" style="display:none;">
       <div class="card card-glow" style="margin-bottom:20px;">
-        <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">Entladekurve</div>
-        <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:4px;">Nur Ruhephasen — Fahrt &amp; Laden (≥13.5V) ausgeblendet</div>
-        <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;" id="entladeSubtitle"></div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+          <div>
+            <div style="font-weight:600; color:var(--text-1); font-size:1rem;">Entladekurve</div>
+            <div style="font-size:0.78rem; color:var(--text-5); margin-top:2px;">Nur Ruhephasen &lt;13V — Fahrt &amp; Laden ausgeblendet</div>
+            <div style="font-size:0.78rem; color:var(--text-5); margin-top:2px;" id="entladeSubtitle"></div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-5); cursor:pointer;">
+              <input type="checkbox" id="entladeShowV" checked onchange="App.toggleEntladeSeries('voltage')" style="accent-color:#a855f7;"> Spannung
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-5); cursor:pointer;">
+              <input type="checkbox" id="entladeShowSoc" onchange="App.toggleEntladeSeries('soc')" style="accent-color:#10b981;"> SoC
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-5); cursor:pointer;">
+              <input type="checkbox" id="entladeShowTemp" onchange="App.toggleEntladeSeries('temp')" style="accent-color:#f97316;"> Temperatur
+            </label>
+          </div>
+        </div>
         <div id="entladeChart"></div>
       </div>
     </div><!-- /entlade -->
@@ -2499,8 +2514,11 @@ const App = {
     const self = this;
     const DAY = 86400000;
 
-    // Filter to idle/discharge only (no driving, no charging)
-    const filterIdle = src => src.filter(h => (h.vMax !== undefined ? h.vMax : h.vAvg) < 13.5);
+    // Filter to idle only: peak voltage < 13V
+    const filterIdle = src => src.filter(h => {
+      const peak = h.vMax !== undefined ? h.vMax : (h.vAvg !== undefined ? h.vAvg : h.v);
+      return peak < 13.0;
+    });
 
     const idleHourly  = filterIdle(data.hourly);
     const idleSubHrly = data.subHourly ? filterIdle(data.subHourly) : null;
@@ -2518,17 +2536,17 @@ const App = {
       if (range <= 2 * DAY && idleRaw) {
         const buf = range * 0.3;
         const src = idleRaw.filter(h => { const t = +new Date(h.ts); return t >= minMs-buf && t <= maxMs+buf; });
-        return { src, label: `1-Min · ${src.length} Punkte (nur Ruhephasen)` };
+        return { src, label: `1-Min · ${src.length} Punkte` };
       }
       if (range <= 7 * DAY && idleSubHrly) {
         const buf = range * 0.1;
         const src = idleSubHrly.filter(h => { const t = +new Date(h.ts); return t >= minMs-buf && t <= maxMs+buf; });
-        return { src, label: `10-Min · ${src.length} Punkte (nur Ruhephasen)` };
+        return { src, label: `10-Min · ${src.length} Punkte` };
       }
-      return { src: idleHourly, label: `Stunden · ${idleHourly.length} Punkte (nur Ruhephasen)` };
+      return { src: idleHourly, label: `Stunden · ${idleHourly.length} Punkte` };
     };
 
-    const defaultLabel = `${idleHourly.length} Stunden Ruhephase`;
+    const defaultLabel = `${idleHourly.length} Ruhephasen-Stunden`;
     document.getElementById('entladeSubtitle').textContent = defaultLabel;
 
     const el = document.getElementById('entladeChart');
@@ -2563,23 +2581,33 @@ const App = {
       stroke: { curve: 'smooth', width: [1.5, 2, 1.5] },
       xaxis: { type: 'datetime', labels: { style: { colors: tc5, fontSize:'11px' }, datetimeUTC: false } },
       yaxis: [
-        { seriesName: 'Spannung (V)', title: { text: 'Spannung (V)', style:{color:'#a855f7',fontSize:'11px'} }, min: 11.5, max: 13.0, decimalsInFloat: 2, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(2)+'V' } },
-        { seriesName: 'SoC (%)', opposite: true, title: { text: 'SoC (%)', style:{color:'#10b981',fontSize:'11px'} }, min: 0, max: 105, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(0)+'%' } },
+        { seriesName: 'Spannung (V)', title: { text: 'V', style:{color:'#a855f7',fontSize:'11px'} }, min: 11.5, max: 13.0, decimalsInFloat: 2, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(2)+'V' } },
+        { seriesName: 'SoC (%)', opposite: true, title: { text: 'SoC', style:{color:'#10b981',fontSize:'11px'} }, min: 0, max: 105, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(0)+'%' } },
         { seriesName: 'Temp (°C)', show: false, min: -10, max: 60 },
       ],
       tooltip: {
         theme: themeMode, x: { format: 'dd.MM.yyyy HH:mm' },
         y: [
-          { formatter: v => v ? v.toFixed(3)+'V' : '-' },
-          { formatter: v => v ? v.toFixed(1)+'%' : '-' },
-          { formatter: v => v ? v.toFixed(1)+'°C' : '-' },
+          { formatter: v => v != null ? v.toFixed(3)+'V' : '-' },
+          { formatter: v => v != null ? v.toFixed(1)+'%' : '-' },
+          { formatter: v => v != null ? v.toFixed(1)+'°C' : '-' },
         ],
       },
-      legend: { show: true, labels: { colors: tc3 }, markers: { size: 5 } },
+      legend: { show: false },
       grid: { borderColor: tdiv, strokeDashArray: 3 },
       theme: { mode: themeMode },
     });
-    this.charts.entlade.render();
+    // Render then hide SoC and Temp by default
+    this.charts.entlade.render().then(() => {
+      this.charts.entlade.toggleSeries('SoC (%)');
+      this.charts.entlade.toggleSeries('Temp (°C)');
+    });
+  },
+
+  toggleEntladeSeries(series) {
+    if (!this.charts.entlade) return;
+    const map = { voltage: 'Spannung (V)', soc: 'SoC (%)', temp: 'Temp (°C)' };
+    this.charts.entlade.toggleSeries(map[series]);
   },
 
   showHelp() { document.getElementById('helpModal').style.display = 'flex'; },
