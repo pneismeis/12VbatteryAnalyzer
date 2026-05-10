@@ -1910,14 +1910,18 @@ const App = {
     evEl.innerHTML = d.events.slice(0,50).map(e => {
       const cls = e.severity==='critical'?'event-critical':'event-warning';
       const ts = (e.ts||'').slice(0,16).replace('T',' ');
+      const dateStr = (e.ts||'').slice(0,10);
       let detail = '';
       if (e.type==='UNDERVOLTAGE') detail = `${e.count}h unter 12.0V — Tiefstwert ${e.minV}V`;
       else if (e.type==='SUDDEN_DROP') detail = `${e.from.toFixed(3)}V → ${e.to.toFixed(3)}V (−${e.drop}V)`;
       else if (e.type==='CRITICAL_READING') detail = `${e.v.toFixed(3)}V`;
-      return `<div class="event-item ${cls}">
-        <span style="font-weight:600;color:var(--text-2);margin-right:8px;">${evLabels[e.type]||e.type}</span>
-        <span style="color:var(--text-5);font-size:0.78rem;margin-right:8px;">${ts}</span>
-        <span style="color:var(--text-4);">${detail}</span>
+      return `<div class="event-item ${cls}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <div>
+          <span style="font-weight:600;color:var(--text-2);margin-right:8px;">${evLabels[e.type]||e.type}</span>
+          <span style="color:var(--text-5);font-size:0.78rem;margin-right:8px;">${ts}</span>
+          <span style="color:var(--text-4);">${detail}</span>
+        </div>
+        ${dateStr?`<button onclick="App.showDayDetail('${dateStr}')" style="flex-shrink:0;padding:3px 10px;border-radius:6px;border:1px solid rgba(59,130,246,0.3);background:rgba(59,130,246,0.08);color:#93c5fd;font-size:0.75rem;cursor:pointer;white-space:nowrap;" onmouseover="this.style.background='rgba(59,130,246,0.18)'" onmouseout="this.style.background='rgba(59,130,246,0.08)'">📅 Tag ansehen</button>`:''}
       </div>`;
     }).join('');
   },
