@@ -2199,7 +2199,7 @@ const App = {
     const scatterOpts = (series, xTitle) => ({
       chart:{type:'scatter',height:260,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
       series, markers:{size:3,strokeWidth:0},
-      xaxis:{title:{text:xTitle,style:{color:tc4,fontSize:'10px'}},labels:{style:{colors:tc5,fontSize:'9px'}}},
+      xaxis:{title:{text:xTitle,style:{color:tc4,fontSize:'10px'}},tickAmount:10,labels:{style:{colors:tc5,fontSize:'9px'}}},
       yaxis:{title:{text:'V',style:{color:tc4,fontSize:'10px'}},min:11.5,max:13.5,decimalsInFloat:2,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(1)}},
       tooltip:{theme:themeMode,x:{formatter:v=>v+' '+xTitle},y:{formatter:v=>v.toFixed(3)+'V'}},
       legend:{labels:{colors:tc3},markers:{size:5}},
