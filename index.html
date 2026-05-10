@@ -304,16 +304,21 @@
         </div>
       </div>
       <div class="card card-glow" style="margin-bottom:20px;">
-        <div style="font-weight:600; color:var(--text-1); margin-bottom:16px; display:flex; align-items:center; justify-content:space-between;">
+        <div style="font-weight:600; color:var(--text-1); margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
           <span>Tagesdaten</span>
-          <span style="font-size:0.75rem; color:var(--text-5);" id="tableMonthLabel"></span>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-5); cursor:pointer; font-weight:400;">
+              <input type="checkbox" id="showTableFahrten" checked onchange="App.toggleTableFahrten()" style="accent-color:#818cf8;"> Fahrten anzeigen
+            </label>
+            <span style="font-size:0.75rem; color:var(--text-5);" id="tableMonthLabel"></span>
+          </div>
         </div>
         <div class="scroll-x">
           <table>
             <thead><tr>
               <th>Tag</th><th>SoC Start → End</th><th>SoC Bereich</th>
               <th>Idle V ⌀</th><th>Temp ⌀</th>
-              <th title="Stunden mit Spannung ≥13V = Auto gefahren / geladen">Fahrten <span style="color:var(--text-6);font-size:0.68rem;">(≥13V)</span></th>
+              <th class="col-fahrten" title="Stunden mit Spannung ≥14V = Auto gefahren">Fahrten <span style="color:var(--text-6);font-size:0.68rem;">(≥14V)</span></th>
             </tr></thead>
             <tbody id="dailyTableBody"></tbody>
           </table>
@@ -902,21 +907,24 @@ const App = {
     const vSeries = hourly.map(h => [new Date(h.ts).getTime(), h.vAvg]);
     const tempSeries = hourly.map(h => [new Date(h.ts).getTime(), h.temp]);
 
+    const showFahrten = document.getElementById('showCharging')?.checked !== false;
     const chargingAnnotations = [];
-    let chargeStart = null, chargeIdx = 0;
-    hourly.forEach((h, i) => {
-      const driving = h.vMax >= 14.0;
-      if (driving && !chargeStart) { chargeStart = new Date(h.ts).getTime(); chargeIdx = i; }
-      if (!driving && chargeStart) {
-        chargingAnnotations.push({ x: chargeStart, x2: new Date(hourly[i-1].ts).getTime(),
-          fillColor:'rgba(129,140,248,0.1)', borderColor:'transparent',
-          label:{ text:'Fahrt', style:{ color:'#818cf8', background:'transparent', fontSize:'10px', fontWeight:600 }, offsetY: -4 } });
-        chargeStart = null;
-      }
-    });
-    if (chargeStart) chargingAnnotations.push({ x: chargeStart, x2: new Date(hourly[hourly.length-1].ts).getTime(),
-      fillColor:'rgba(129,140,248,0.1)', borderColor:'transparent',
-      label:{ text:'Fahrt', style:{ color:'#818cf8', background:'transparent', fontSize:'10px', fontWeight:600 }, offsetY: -4 } });
+    if (showFahrten) {
+      let chargeStart = null;
+      hourly.forEach((h, i) => {
+        const driving = h.vMax >= 14.0;
+        if (driving && !chargeStart) chargeStart = new Date(h.ts).getTime();
+        if (!driving && chargeStart) {
+          chargingAnnotations.push({ x: chargeStart, x2: new Date(hourly[i-1].ts).getTime(),
+            fillColor:'rgba(129,140,248,0.1)', borderColor:'transparent',
+            label:{ text:'Fahrt', style:{ color:'#818cf8', background:'transparent', fontSize:'10px', fontWeight:600 }, offsetY: -4 } });
+          chargeStart = null;
+        }
+      });
+      if (chargeStart) chargingAnnotations.push({ x: chargeStart, x2: new Date(hourly[hourly.length-1].ts).getTime(),
+        fillColor:'rgba(129,140,248,0.1)', borderColor:'transparent',
+        label:{ text:'Fahrt', style:{ color:'#818cf8', background:'transparent', fontSize:'10px', fontWeight:600 }, offsetY: -4 } });
+    }
 
     const isDark = document.documentElement.classList.contains('dark');
     const tc4 = tv('--text-4'), tc5 = tv('--text-5'), tc3 = tv('--text-3'), tdiv = tv('--divider');
@@ -1109,10 +1117,16 @@ const App = {
         </td>
         <td style="color:${vColor}; font-family:monospace; font-size:0.85rem;">${d.vIdleAvg.toFixed(3)} V</td>
         <td style="color:#f97316;">${d.tempAvg.toFixed(1)}<span style="color:var(--text-6); font-size:0.78rem;"> °C</span></td>
-        <td>${drivingHtml}</td>
+        <td class="col-fahrten">${drivingHtml}</td>
       `;
       tbody.appendChild(tr);
     });
+    this.toggleTableFahrten();
+  },
+
+  toggleTableFahrten() {
+    const show = document.getElementById('showTableFahrten')?.checked !== false;
+    document.querySelectorAll('.col-fahrten').forEach(el => { el.style.display = show ? '' : 'none'; });
   },
 
   async showOverview(fromHistory = false) {
