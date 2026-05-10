@@ -2465,7 +2465,11 @@ const App = {
     if (url.length < 100) return; // already short
     btn.textContent = '…'; btn.disabled = true;
     try {
-      const r = await fetch('https://is.gd/create.php?format=simple&url=' + encodeURIComponent(url));
+      const r = await fetch('https://is.gd/create.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'format=simple&url=' + encodeURIComponent(url),
+      });
       const short = (await r.text()).trim();
       if (!short.startsWith('http')) throw new Error(short);
       input.value = short;
