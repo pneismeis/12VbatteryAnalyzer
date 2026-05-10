@@ -215,6 +215,7 @@
       <button id="overviewTab" class="tab-btn" onclick="App.showOverview()">
         <span style="margin-right:4px;">📊</span> Übersicht
       </button>
+      <button id="clearLocalBtn" onclick="App.clearLocalData()" title="Lokale Daten löschen" style="display:none; padding:6px 12px; border-radius:8px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); color:#f87171; font-size:0.78rem; font-weight:500; cursor:pointer;" onmouseover="this.style.background='rgba(239,68,68,0.2)'" onmouseout="this.style.background='rgba(239,68,68,0.1)'">Daten löschen</button>
       <button id="shareBtn" class="theme-btn" onclick="App.shareMonth()" title="Monat teilen" style="display:none;">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
@@ -909,9 +910,23 @@ const App = {
         localMonths.push({ month, label, local: true });
       }
     }
-    const existing = new Set(this.manifest.months.map(m=>m.month));
-    localMonths.forEach(m => { if (!existing.has(m.month)) this.manifest.months.push(m); });
+    if (localMonths.length > 0) {
+      // Local imports take over — hide static months entirely
+      this.manifest.months = localMonths;
+    }
     this.manifest.months.sort((a,b)=>a.month.localeCompare(b.month));
+  },
+
+  clearLocalData() {
+    const keys = [];
+    for (let i=0; i<localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('battery_month_')) keys.push(k);
+    }
+    keys.forEach(k => localStorage.removeItem(k));
+    // Clear cached month data for local entries
+    keys.forEach(k => { delete this.monthData[k.replace('battery_month_', '')]; });
+    location.reload();
   },
 
   renderTabs() {
@@ -977,9 +992,12 @@ const App = {
       const btn = document.getElementById(`itab-${t}`);
       if (btn) { btn.classList.toggle('active', t==='uebersicht'); }
     });
-    // Share button: show only for non-shared views
+    // Share / clear buttons
+    const isLocal = !!this.manifest.months.find(m => m.month === data.month && m.local);
     const shareBtn = document.getElementById('shareBtn');
     if (shareBtn) shareBtn.style.display = data._shared ? 'none' : '';
+    const clearBtn = document.getElementById('clearLocalBtn');
+    if (clearBtn) clearBtn.style.display = isLocal ? '' : 'none';
     // Shared banner
     const banner = document.getElementById('sharedBanner');
     if (banner) {
