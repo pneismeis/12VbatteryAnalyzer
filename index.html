@@ -828,6 +828,26 @@ function parseXLSBuffer(buffer) {
 
 function avg(arr) { return arr.reduce((s,v)=>s+v,0)/arr.length; }
 function round(n,d) { return Math.round(n*Math.pow(10,d))/Math.pow(10,d); }
+function reconstructDaily(hourly) {
+  const byDay = {};
+  hourly.forEach(h => { const d = h.ts.slice(0,10); (byDay[d]=byDay[d]||[]).push(h); });
+  return Object.keys(byDay).sort().map(day => {
+    const hrs = byDay[day];
+    const idle = hrs.filter(h => !h.charging);
+    const socV = hrs.map(h=>h.soc), tempV = hrs.map(h=>h.temp);
+    const vI = (idle.length ? idle : hrs).map(h=>h.vAvg);
+    const cc = hrs.filter(h=>h.charging).length;
+    return {
+      date: day,
+      socStart: hrs[0].soc, socEnd: hrs[hrs.length-1].soc,
+      socMin: Math.min(...socV), socMax: Math.max(...socV), socAvg: round(avg(socV),1),
+      vIdleAvg: round(avg(vI),3), vIdleMin: round(Math.min(...vI),3),
+      vMax: round(Math.max(...hrs.map(h=>h.vMax)),3),
+      tempAvg: round(avg(tempV),1), tempMin: Math.min(...tempV), tempMax: Math.max(...tempV),
+      chargingHours: cc, charged: cc > 0,
+    };
+  });
+}
 function pct(sorted,p){if(!sorted.length)return 0;const idx=(p/100)*(sorted.length-1);const lo=Math.floor(idx),hi=Math.ceil(idx);return lo===hi?sorted[lo]:sorted[lo]+(idx-lo)*(sorted[hi]-sorted[lo]);}
 function stddev(arr){if(arr.length<2)return 0;const m=avg(arr);return Math.sqrt(arr.reduce((s,v)=>s+(v-m)**2,0)/arr.length);}
 function pearson(xs,ys){const n=xs.length;if(n<2)return 0;const mx=avg(xs),my=avg(ys);const num=xs.reduce((s,x,i)=>s+(x-mx)*(ys[i]-my),0);const den=Math.sqrt(xs.reduce((s,x)=>s+(x-mx)**2,0)*ys.reduce((s,y)=>s+(y-my)**2,0));return den?round(num/den,3):0;}
@@ -877,6 +897,7 @@ const App = {
     }
 
     const params = new URLSearchParams(location.search);
+    if (location.hash.startsWith('#paste=')) { await this.loadPaste(location.hash.slice(7)); return; }
     const hashShare = location.hash.startsWith('#share=') ? location.hash.slice(7) : null;
     const shareParam = hashShare || params.get('share'); // params.get fallback for old links
     if (shareParam) { await this.loadShare(shareParam); return; }
@@ -894,10 +915,11 @@ const App = {
       const p = new URLSearchParams(location.search);
       if (p.get('view') === 'overview') {
         this.showOverview(true);
+      } else if (location.hash.startsWith('#paste=')) {
+        this.loadPaste(location.hash.slice(7)).catch(() => {});
       } else if (location.hash.startsWith('#share=') || p.get('share')) {
         const encoded = location.hash.startsWith('#share=') ? location.hash.slice(7) : p.get('share');
         this.loadShare(encoded).catch(() => {});
-        // tab applied inside loadShare after render
       } else {
         const m = p.get('m') || this.manifest.months[this.manifest.months.length - 1].month;
         const tab = p.get('tab');
@@ -2434,14 +2456,28 @@ const App = {
   showHelp() { document.getElementById('helpModal').style.display = 'flex'; },
   closeHelp() { document.getElementById('helpModal').style.display = 'none'; },
 
-  buildShareUrl(data) {
-    const payload = {
-      month: data.month, label: data.label, summary: data.summary, daily: data.daily,
-      hourly: data.hourly.map(h => [h.ts, h.vAvg, h.vMin, h.vMax, h.soc, h.temp, h.charging ? 1 : 0]),
+  buildSharePayload(data) {
+    // v2: minute-offsets (int), vAvg×100 (int), no vMin/vMax, no daily → ~8KB URL vs 15KB v1
+    const base = data.hourly[0].ts;
+    const baseMs = +new Date(base);
+    const toMins = ts => Math.round((+new Date(ts) - baseMs) / 60000);
+    return {
+      v: 2,
+      month: data.month, label: data.label, summary: data.summary,
+      base,
+      h: data.hourly.map(h => [
+        toMins(h.ts),
+        Math.round(h.vAvg * 100),
+        Math.round(h.soc),
+        Math.round(h.temp * 10),
+        h.charging ? 1 : 0,
+      ]),
       _shared: true,
     };
-    const c = LZString.compressToEncodedURIComponent(JSON.stringify(payload));
-    // Use fragment (#) — never sent to server, avoids 414 URI Too Long on GitHub Pages
+  },
+
+  buildShareUrl(data) {
+    const c = LZString.compressToEncodedURIComponent(JSON.stringify(this.buildSharePayload(data)));
     return location.origin + location.pathname + '#share=' + c;
   },
 
@@ -2467,22 +2503,45 @@ const App = {
     const input = document.getElementById('shareUrlInput');
     const btn   = document.getElementById('shortenBtn');
     const url   = input.value;
-    if (url.length < 100) return; // already short
+    if (!url.includes('#share=')) return;
     btn.textContent = '…'; btn.disabled = true;
     try {
-      const r = await fetch('https://is.gd/create.php', {
+      // Upload compressed blob to dpaste.org, get a short paste ID
+      const compressed = url.split('#share=')[1];
+      const r = await fetch('https://dpaste.org/api/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'format=simple&url=' + encodeURIComponent(url),
+        body: 'content=' + encodeURIComponent(compressed) + '&syntax=text&expiry_days=365',
       });
-      const short = (await r.text()).trim();
-      if (!short.startsWith('http')) throw new Error(short);
-      input.value = short;
-      document.getElementById('shareInfo').textContent += ' · gekürzt';
+      const pasteUrl = (await r.text()).trim().replace(/"/g, '');
+      const pasteId = pasteUrl.split('/').filter(Boolean).pop();
+      if (!pasteId || pasteId.length < 3) throw new Error('Ungültige Antwort');
+      const shortUrl = location.origin + location.pathname + '#paste=' + pasteId;
+      input.value = shortUrl;
+      document.getElementById('shareInfo').textContent += ' · ~' + shortUrl.length + ' Zeichen';
       btn.textContent = '✓'; btn.disabled = true;
     } catch(e) {
-      this.showToast('Kürzung fehlgeschlagen', true);
+      this.showToast('Kürzung fehlgeschlagen: ' + e.message, true);
       btn.textContent = 'Kürzen'; btn.disabled = false;
+    }
+  },
+
+  async loadPaste(pasteId) {
+    document.getElementById('loadingState').style.display = 'flex';
+    document.getElementById('monthView').style.display = 'none';
+    try {
+      const r = await fetch(`https://dpaste.org/${pasteId}.txt`);
+      if (!r.ok) throw new Error(`Paste nicht gefunden (${r.status})`);
+      const compressed = (await r.text()).trim();
+      await this.loadShare(compressed);
+    } catch(e) {
+      document.getElementById('loadingState').style.display = 'flex';
+      document.getElementById('loadingState').innerHTML = `
+        <div style="text-align:center;">
+          <div style="font-size:2.5rem; margin-bottom:16px;">⚠️</div>
+          <div style="font-size:1rem; font-weight:600; color:var(--text-1); margin-bottom:8px;">Link nicht ladbar</div>
+          <div style="font-size:0.82rem; color:var(--text-5);">${e.message}</div>
+        </div>`;
     }
   },
 
@@ -2507,10 +2566,30 @@ const App = {
       const json = LZString.decompressFromEncodedURIComponent(encoded);
       if (!json) throw new Error('Ungültiger oder beschädigter Link');
       const raw = JSON.parse(json);
-      // Reconstruct hourly objects from compact arrays
-      raw.hourly = raw.hourly.map(h => ({
-        ts: h[0], vAvg: h[1], vMin: h[2], vMax: h[3], soc: h[4], temp: h[5], charging: !!h[6]
-      }));
+      if (raw.v === 2 && raw.h) {
+        // v2: decode minute-offsets back to ISO timestamps, reconstruct vMin/vMax/daily
+        const [bDate, bTime] = raw.base.split('T');
+        const [bY, bMo, bD] = bDate.split('-').map(Number);
+        const [bH, bMin] = bTime.split(':').map(Number);
+        const pad = n => String(n).padStart(2,'0');
+        const fromMins = offset => {
+          const d = new Date(bY, bMo-1, bD, bH, bMin + offset);
+          return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
+        raw.hourly = raw.h.map(h => {
+          const vAvg = h[1] / 100;
+          const charging = !!h[4];
+          return { ts: fromMins(h[0]), vAvg, vMin: vAvg, vMax: charging ? 14.5 : vAvg, soc: h[2], temp: h[3] / 10, charging };
+        });
+        raw.daily = reconstructDaily(raw.hourly);
+        delete raw.h;
+      } else {
+        // v1 legacy
+        raw.hourly = raw.hourly.map(h => ({
+          ts: h[0], vAvg: h[1], vMin: h[2], vMax: h[3], soc: h[4], temp: h[5], charging: !!h[6]
+        }));
+        if (!raw.daily) raw.daily = reconstructDaily(raw.hourly);
+      }
       raw._shared = true;
       this.monthData[raw.month] = raw;
       this.manifest = { months: [{ month: raw.month, label: raw.label }] };
