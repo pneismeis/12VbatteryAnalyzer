@@ -2171,21 +2171,31 @@ const App = {
 
       if (this.charts.dayChart) { try{this.charts.dayChart.destroy();}catch(e){} }
       this.charts.dayChart = new ApexCharts(document.getElementById('dayChartContainer'), {
-        chart:{type:'line',height:260,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
+        chart:{type:'line',height:280,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
         series:[
           {name:'SoC (%)',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.soc]),color:'#10b981'},
-          {name:'Spannung (V)',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.vAvg]),color:'#a855f7'},
+          {name:'V ⌀',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.vAvg]),color:'#a855f7'},
+          {name:'V Min',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.vMin]),color:'#c084fc'},
+          {name:'V Max',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.vMax]),color:'#7c3aed'},
           {name:'Temperatur (°C)',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.temp]),color:'#f97316'},
         ],
-        stroke:{curve:'smooth',width:[2,1.5,1.5]},
+        stroke:{curve:'smooth',width:[2,1.5,1,1,1.5],dashArray:[0,0,4,4,0]},
         xaxis:{type:'datetime',labels:{style:{colors:tc5,fontSize:'10px'},datetimeUTC:false,format:'HH:mm'}},
         yaxis:[
           {seriesName:'SoC (%)',title:{text:'SoC (%)',style:{color:'#10b981',fontSize:'10px'}},min:0,max:105,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(0)+'%'}},
-          {seriesName:'Spannung (V)',opposite:true,title:{text:'V',style:{color:'#a855f7',fontSize:'10px'}},min:11.0,max:16.0,decimalsInFloat:2,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(1)+'V'}},
+          {seriesName:'V ⌀',opposite:true,title:{text:'V',style:{color:'#a855f7',fontSize:'10px'}},min:11.0,max:16.0,decimalsInFloat:2,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(1)+'V'}},
+          {seriesName:'V Min',show:false,min:11.0,max:16.0},
+          {seriesName:'V Max',show:false,min:11.0,max:16.0},
           {seriesName:'Temperatur (°C)',show:false,min:-10,max:60},
         ],
         annotations:{xaxis:annotations},
-        tooltip:{theme:themeMode,x:{format:'HH:mm'},y:[{formatter:v=>v?v.toFixed(1)+'%':'-'},{formatter:v=>v?v.toFixed(3)+'V':'-'},{formatter:v=>v?v.toFixed(1)+'°C':'-'}]},
+        tooltip:{theme:themeMode,x:{format:'HH:mm'},y:[
+          {formatter:v=>v?v.toFixed(1)+'%':'-'},
+          {formatter:v=>v?v.toFixed(3)+'V':'-'},
+          {formatter:v=>v?v.toFixed(3)+'V':'-'},
+          {formatter:v=>v?v.toFixed(3)+'V':'-'},
+          {formatter:v=>v?v.toFixed(1)+'°C':'-'},
+        ]},
         legend:{labels:{colors:tc3},markers:{size:5}},
         grid:{borderColor:tdiv,strokeDashArray:3},
         theme:{mode:themeMode},
