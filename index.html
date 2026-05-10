@@ -2507,13 +2507,15 @@ const App = {
     btn.textContent = '…'; btn.disabled = true;
     try {
       const compressed = url.split('#share=')[1];
-      const form = new FormData();
-      form.append('file', new Blob([compressed], { type: 'text/plain' }), 'data.txt');
-      const r = await fetch('https://0x0.st', { method: 'POST', body: form });
+      const r = await fetch('https://paste.rs/', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'text/plain' },
+        body: compressed,
+      });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const pasteUrl = (await r.text()).trim();
-      // pasteUrl is like "https://0x0.st/AbCd.txt" — store the path after the host
-      const pasteId = pasteUrl.replace(/^https?:\/\/0x0\.st\//, '');
+      // pasteUrl is like "https://paste.rs/AbCd"
+      const pasteId = pasteUrl.replace(/^https?:\/\/paste\.rs\//, '');
       if (!pasteId) throw new Error('Ungültige Antwort');
       const shortUrl = location.origin + location.pathname + '#paste=' + encodeURIComponent(pasteId);
       input.value = shortUrl;
@@ -2529,7 +2531,7 @@ const App = {
     document.getElementById('loadingState').style.display = 'flex';
     document.getElementById('monthView').style.display = 'none';
     try {
-      const r = await fetch('https://0x0.st/' + decodeURIComponent(pasteId));
+      const r = await fetch('https://paste.rs/' + decodeURIComponent(pasteId));
       if (!r.ok) throw new Error(`Datei nicht gefunden (${r.status})`);
       const compressed = (await r.text()).trim();
       await this.loadShare(compressed);
