@@ -283,6 +283,7 @@
       <button class="tab-btn" id="itab-ruhetage" onclick="App.switchInnerTab('ruhetage')">Standtage</button>
       <button class="tab-btn" id="itab-tiefen" onclick="App.switchInnerTab('tiefen')">Tiefenanalyse</button>
       <button class="tab-btn" id="itab-ereignisse" onclick="App.switchInnerTab('ereignisse')">Ereignisse</button>
+      <button class="tab-btn" id="itab-entlade" onclick="App.switchInnerTab('entlade')">Entladekurve</button>
     </div>
 
     <!-- Tab: Übersicht -->
@@ -479,6 +480,15 @@
         <div id="eventList"></div>
       </div>
     </div><!-- /ereignisse -->
+
+    <div id="itabContent-entlade" style="display:none;">
+      <div class="card card-glow" style="margin-bottom:20px;">
+        <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">Entladekurve</div>
+        <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:4px;">Nur Ruhephasen — Fahrt &amp; Laden (≥13.5V) ausgeblendet</div>
+        <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;" id="entladeSubtitle"></div>
+        <div id="entladeChart"></div>
+      </div>
+    </div><!-- /entlade -->
 
   </div><!-- /monthView -->
 
@@ -1026,7 +1036,7 @@ const App = {
     // Reset inner tab state
     this.innerTab = 'uebersicht';
     this.tabsRendered = {};
-    ['uebersicht','nacht','wochenprofil','ruhetage','tiefen','ereignisse'].forEach(t => {
+    ['uebersicht','nacht','wochenprofil','ruhetage','tiefen','ereignisse','entlade'].forEach(t => {
       document.getElementById(`itabContent-${t}`).style.display = t==='uebersicht'?'block':'none';
       const btn = document.getElementById(`itab-${t}`);
       if (btn) { btn.classList.toggle('active', t==='uebersicht'); }
@@ -1065,7 +1075,7 @@ const App = {
   switchInnerTab(tabId, fromHistory = false) {
     const data = this.monthData[this.currentMonth];
     if (!data) return;
-    ['uebersicht','nacht','wochenprofil','ruhetage','tiefen','ereignisse'].forEach(t => {
+    ['uebersicht','nacht','wochenprofil','ruhetage','tiefen','ereignisse','entlade'].forEach(t => {
       document.getElementById(`itabContent-${t}`).style.display = t===tabId?'block':'none';
       const btn = document.getElementById(`itab-${t}`);
       if (btn) btn.classList.toggle('active', t===tabId);
@@ -1082,6 +1092,7 @@ const App = {
       else if (tabId==='ruhetage') this.renderRuhetage(data);
       else if (tabId==='tiefen') this.renderTiefenanalyse(data);
       else if (tabId==='ereignisse') this.renderEreignisse(data);
+      else if (tabId==='entlade') this.renderEntladekurve(data);
       this.tabsRendered[tabId] = true;
     }
   },
@@ -2479,6 +2490,96 @@ const App = {
           <div style="font-size:0.82rem; margin-top:4px;">${err.message}</div>
         </div>`;
     }
+  },
+
+  renderEntladekurve(data) {
+    const isDark = document.documentElement.classList.contains('dark');
+    const tc4=tv('--text-4'), tc5=tv('--text-5'), tc3=tv('--text-3'), tdiv=tv('--divider');
+    const themeMode = isDark ? 'dark' : 'light';
+    const self = this;
+    const DAY = 86400000;
+
+    // Filter to idle/discharge only (no driving, no charging)
+    const filterIdle = src => src.filter(h => (h.vMax !== undefined ? h.vMax : h.vAvg) < 13.5);
+
+    const idleHourly  = filterIdle(data.hourly);
+    const idleSubHrly = data.subHourly ? filterIdle(data.subHourly) : null;
+    const idleRaw     = data.readings  ? filterIdle(data.readings)  : null;
+
+    const getV = h => h.vAvg !== undefined ? h.vAvg : h.v;
+    const buildSeries = src => [
+      { name: 'Spannung (V)', data: src.map(h => [+new Date(h.ts), getV(h)]),  color: '#a855f7' },
+      { name: 'SoC (%)',      data: src.map(h => [+new Date(h.ts), h.soc]),    color: '#10b981' },
+      { name: 'Temp (°C)',    data: src.map(h => [+new Date(h.ts), h.temp]),   color: '#f97316' },
+    ];
+
+    const resolveIdle = (minMs, maxMs) => {
+      const range = maxMs - minMs;
+      if (range <= 2 * DAY && idleRaw) {
+        const buf = range * 0.3;
+        const src = idleRaw.filter(h => { const t = +new Date(h.ts); return t >= minMs-buf && t <= maxMs+buf; });
+        return { src, label: `1-Min · ${src.length} Punkte (nur Ruhephasen)` };
+      }
+      if (range <= 7 * DAY && idleSubHrly) {
+        const buf = range * 0.1;
+        const src = idleSubHrly.filter(h => { const t = +new Date(h.ts); return t >= minMs-buf && t <= maxMs+buf; });
+        return { src, label: `10-Min · ${src.length} Punkte (nur Ruhephasen)` };
+      }
+      return { src: idleHourly, label: `Stunden · ${idleHourly.length} Punkte (nur Ruhephasen)` };
+    };
+
+    const defaultLabel = `${idleHourly.length} Stunden Ruhephase`;
+    document.getElementById('entladeSubtitle').textContent = defaultLabel;
+
+    const el = document.getElementById('entladeChart');
+    el.innerHTML = '';
+    if (this.charts.entlade) { try { this.charts.entlade.destroy(); } catch(e){} }
+
+    this.charts.entlade = new ApexCharts(el, {
+      chart: {
+        type: 'line', height: 380, background: 'transparent',
+        toolbar: { show: true, tools: { download: false, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true } },
+        zoom: { enabled: true }, animations: { enabled: false }, foreColor: tc4,
+        events: {
+          zoomed(_ctx, {xaxis}) {
+            clearTimeout(self._entladeZoomTimer);
+            self._entladeZoomTimer = setTimeout(() => {
+              if (!xaxis || xaxis.min == null || xaxis.max == null) return;
+              const {src, label} = resolveIdle(xaxis.min, xaxis.max);
+              self.charts.entlade.updateSeries(buildSeries(src), false);
+              document.getElementById('entladeSubtitle').textContent = label;
+            }, 50);
+          },
+          beforeResetZoom() {
+            clearTimeout(self._entladeZoomTimer);
+            self._entladeZoomTimer = setTimeout(() => {
+              self.charts.entlade.updateSeries(buildSeries(idleHourly), false);
+              document.getElementById('entladeSubtitle').textContent = defaultLabel;
+            }, 50);
+          },
+        },
+      },
+      series: buildSeries(idleHourly),
+      stroke: { curve: 'smooth', width: [1.5, 2, 1.5] },
+      xaxis: { type: 'datetime', labels: { style: { colors: tc5, fontSize:'11px' }, datetimeUTC: false } },
+      yaxis: [
+        { seriesName: 'Spannung (V)', title: { text: 'Spannung (V)', style:{color:'#a855f7',fontSize:'11px'} }, min: 11.5, max: 13.0, decimalsInFloat: 2, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(2)+'V' } },
+        { seriesName: 'SoC (%)', opposite: true, title: { text: 'SoC (%)', style:{color:'#10b981',fontSize:'11px'} }, min: 0, max: 105, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(0)+'%' } },
+        { seriesName: 'Temp (°C)', show: false, min: -10, max: 60 },
+      ],
+      tooltip: {
+        theme: themeMode, x: { format: 'dd.MM.yyyy HH:mm' },
+        y: [
+          { formatter: v => v ? v.toFixed(3)+'V' : '-' },
+          { formatter: v => v ? v.toFixed(1)+'%' : '-' },
+          { formatter: v => v ? v.toFixed(1)+'°C' : '-' },
+        ],
+      },
+      legend: { show: true, labels: { colors: tc3 }, markers: { size: 5 } },
+      grid: { borderColor: tdiv, strokeDashArray: 3 },
+      theme: { mode: themeMode },
+    });
+    this.charts.entlade.render();
   },
 
   showHelp() { document.getElementById('helpModal').style.display = 'flex'; },
