@@ -1640,10 +1640,10 @@ const App = {
     const DOW_DE = ['Mo','Di','Mi','Do','Fr','Sa','So'];
     const DOW_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#a855f7','#f97316','#ec4899'];
 
-    // Use finest available resolution: readings (1-min) → subHourly (10-min) → hourly (60-min)
+    // Use finest available resolution, capped at 5-min buckets to keep ApexCharts responsive
     const src = data.readings || data.subHourly || data.hourly;
     const isRaw = !!data.readings;
-    const bucketMins = data.readings ? 1 : data.subHourly ? 10 : 60;
+    const bucketMins = data.readings ? 5 : data.subHourly ? 10 : 60;
     const nBuckets = 24 * 60 / bucketMins;
     const labels = Array.from({length:nBuckets}, (_,i) => {
       const h = Math.floor(i * bucketMins / 60), m = (i * bucketMins) % 60;
