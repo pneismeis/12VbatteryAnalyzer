@@ -673,23 +673,36 @@ function processRawReadings(readings) {
   const clean = readings.filter(r => r.v >= 3 && r.v <= 20 && r.soc >= 0);
   if (!clean.length) return null;
 
-  const byHour = {};
+  const byHour = {}, by10min = {};
   clean.forEach(r => {
     const d = new Date(r.ts);
-    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:00`;
-    if (!byHour[k]) byHour[k] = [];
-    byHour[k].push(r);
+    const pad2 = n => String(n).padStart(2,'0');
+    const datePrefix = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+    const hKey = `${datePrefix}T${pad2(d.getHours())}:00`;
+    if (!byHour[hKey]) byHour[hKey] = [];
+    byHour[hKey].push(r);
+    const m10 = Math.floor(d.getMinutes()/10)*10;
+    const tKey = `${datePrefix}T${pad2(d.getHours())}:${pad2(m10)}`;
+    if (!by10min[tKey]) by10min[tKey] = [];
+    by10min[tKey].push(r);
   });
 
-  const hourly = Object.keys(byHour).sort().map(k => {
-    const pts = byHour[k];
+  function aggregateBucket(pts) {
     const vAvg = pts.reduce((s,p)=>s+p.v,0)/pts.length;
     const vMin = Math.min(...pts.map(p=>p.v));
     const vMax = Math.max(...pts.map(p=>p.v));
-    const soc = pts.reduce((s,p)=>s+p.soc,0)/pts.length;
+    const soc  = pts.reduce((s,p)=>s+p.soc,0)/pts.length;
     const temp = pts.reduce((s,p)=>s+p.temp,0)/pts.length;
-    return { ts:k, vAvg:round(vAvg,3), vMin:round(vMin,3), vMax:round(vMax,3), soc:round(soc,1), temp:round(temp,1), charging: vMax>=13.5 };
-  });
+    return { vAvg:round(vAvg,3), vMin:round(vMin,3), vMax:round(vMax,3), soc:round(soc,1), temp:round(temp,1), charging: vMax>=13.5 };
+  }
+
+  const hourly = Object.keys(byHour).sort().map(k => ({ ts:k, ...aggregateBucket(byHour[k]) }));
+
+  // 10-minute resolution — only stored if source has sub-minute granularity (avg bucket size > 1)
+  const totalBuckets = Object.keys(by10min).length;
+  const subHourly = (clean.length / totalBuckets > 1.2)
+    ? Object.keys(by10min).sort().map(k => ({ ts:k, ...aggregateBucket(by10min[k]) }))
+    : null;
 
   const byDay = {};
   hourly.forEach(h => {
@@ -739,7 +752,7 @@ function processRawReadings(readings) {
       tempMin: round(Math.min(...allTemp),1), tempMax: round(Math.max(...allTemp),1), tempAvg: round(avg(allTemp),1),
       chargingDays: daily.filter(d=>d.charged).length, daysRecorded: daily.length,
     },
-    daily, hourly,
+    daily, hourly, ...(subHourly ? {subHourly} : {}),
   };
 }
 
@@ -1553,45 +1566,55 @@ const App = {
   },
 
   renderNightOverlay(data) {
-    const { hourly } = data;
+    const src = data.subHourly || data.hourly;
+    const step = data.subHourly ? 10 : 60; // minutes per slot
     const isDark = document.documentElement.classList.contains('dark');
     const tc4=tv('--text-4'), tc5=tv('--text-5'), tdiv=tv('--divider');
     const themeMode = isDark?'dark':'light';
+    const pad2 = n => String(n).padStart(2,'0');
 
-    // Group idle night hours by night key (same logic as computeDiagnose)
-    const nightSet = new Set([22,23,0,1,2,3,4,5]);
-    const byNight = {};
-    hourly.forEach(h => {
-      if (!nightSet.has(new Date(h.ts).getHours()) || h.vMax >= 14.0) return;
-      const dt = new Date(h.ts), hr = dt.getHours();
-      const key = hr >= 6 ? dt.toISOString().slice(0,10)
-                           : new Date(dt.getTime()-86400000).toISOString().slice(0,10);
-      if (!byNight[key]) byNight[key] = {};
-      byNight[key][hr] = round(h.vAvg, 3);
-    });
+    // Build slot definitions: 8h × (60/step) slots per hour
+    const NIGHT_HRS = [22,23,0,1,2,3,4,5];
+    const slots = [];
+    for (const h of NIGHT_HRS)
+      for (let m=0; m<60; m+=step)
+        slots.push({ h, m, key:`${h}:${pad2(m)}`, label:`${pad2(h)}:${pad2(m)}` });
+    const xLabels = slots.map((s,i) => step===10 ? (i%6===0 ? s.label : '') : s.label);
 
-    const NIGHT_HOURS = [22,23,0,1,2,3,4,5];
-    const xLabels = ['22h','23h','00h','01h','02h','03h','04h','05h'];
-
-    // Interpolate nulls within an array
+    // Interpolate null gaps
     function interp(arr) {
-      const out = [...arr];
-      for (let i=0; i<out.length; i++) {
-        if (out[i] !== null) continue;
-        let lo=i-1, hi=i+1;
-        while (hi<out.length && out[hi]===null) hi++;
-        if (lo>=0 && hi<out.length) out[i]=round(out[lo]+(out[hi]-out[lo])*(i-lo)/(hi-lo),3);
-        else if (lo>=0) out[i]=out[lo];
-        else if (hi<out.length) out[i]=out[hi];
+      const out=[...arr];
+      for(let i=0;i<out.length;i++){
+        if(out[i]!==null)continue;
+        let lo=i-1,hi=i+1;
+        while(hi<out.length&&out[hi]===null)hi++;
+        if(lo>=0&&hi<out.length)out[i]=round(out[lo]+(out[hi]-out[lo])*(i-lo)/(hi-lo),3);
+        else if(lo>=0)out[i]=out[lo];
+        else if(hi<out.length)out[i]=out[hi];
       }
       return out;
     }
 
-    // Build one series per night, only current month, min 3 data points
+    // Group readings by night date + slot key
+    const byNight = {};
+    src.forEach(h => {
+      const dt = new Date(h.ts), hr = dt.getHours();
+      if (!NIGHT_HRS.includes(hr) || h.vMax >= 14.0) return;
+      const nightDate = hr >= 6 ? dt.toISOString().slice(0,10)
+                                 : new Date(dt.getTime()-86400000).toISOString().slice(0,10);
+      if (!nightDate.startsWith(data.month)) return;
+      if (!byNight[nightDate]) byNight[nightDate] = {};
+      const slotKey = `${hr}:${pad2(Math.floor(dt.getMinutes()/step)*step)}`;
+      if (!byNight[nightDate][slotKey]) byNight[nightDate][slotKey] = [];
+      byNight[nightDate][slotKey].push(h.vAvg);
+    });
+
     const series = Object.entries(byNight)
-      .filter(([date]) => date.startsWith(data.month))
-      .map(([date, hourMap]) => {
-        const raw = NIGHT_HOURS.map(hr => hourMap[hr] ?? null);
+      .map(([date, slotMap]) => {
+        const raw = slots.map(s => {
+          const vs = slotMap[s.key];
+          return vs ? round(vs.reduce((a,b)=>a+b,0)/vs.length, 3) : null;
+        });
         const vals = raw.filter(v => v !== null);
         if (vals.length < 3) return null;
         const drop = vals[0] - vals[vals.length-1];
@@ -1610,21 +1633,25 @@ const App = {
       return;
     }
 
+    const resLabel = step === 10 ? '10-Minuten-Auflösung' : 'Stunden-Auflösung (kein Sub-Minuten-Import)';
+    el.insertAdjacentHTML('beforebegin',
+      `<div id="nightOverlayRes" style="font-size:0.7rem;color:var(--text-6);margin-bottom:6px;">Auflösung: ${resLabel}</div>`);
+
     this.charts.nightOverlay = new ApexCharts(el, {
-      chart:{type:'line',height:280,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
+      chart:{type:'line',height:300,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
       series,
-      stroke:{curve:'smooth',width:1.5},
+      stroke:{curve:'smooth',width:step===10?1:1.5},
       markers:{size:0},
       colors: series.map(s=>s.color),
-      xaxis:{categories:xLabels,labels:{style:{colors:tc5,fontSize:'11px'}}},
+      xaxis:{categories:xLabels,labels:{style:{colors:tc5,fontSize:'10px'},rotate:step===10?-45:0}},
       yaxis:{min:11.5,max:13.5,decimalsInFloat:2,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(2)+'V'}},
       tooltip:{
         theme:themeMode,
-        x:{formatter:(_,{dataPointIndex:i})=>xLabels[i]},
+        x:{formatter:(_,{dataPointIndex:i})=>slots[i].label},
         y:{formatter:v=>v?v.toFixed(3)+'V':'–'},
         shared:false,
       },
-      legend:{show: series.length <= 15, labels:{colors:tc5}, markers:{size:6}, fontSize:'11px'},
+      legend:{show:series.length<=15,labels:{colors:tc5},markers:{size:6},fontSize:'11px'},
       grid:{borderColor:tdiv,strokeDashArray:3},
       theme:{mode:themeMode},
     });
