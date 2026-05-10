@@ -1434,13 +1434,14 @@ const App = {
 
   renderNacht(data) {
     const d = this.computeDiagnose(data);
-    // Night comparison table
+    // Night comparison table — only rows belonging to this month
+    const nightRows = d.nightRows.filter(r => r.date.startsWith(data.month));
     const tbody = document.getElementById('nightTableBody');
     tbody.innerHTML = '';
-    if (!d.nightRows.length) {
+    if (!nightRows.length) {
       tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-5);text-align:center;padding:20px;">Zu wenig Nacht-Daten</td></tr>';
     } else {
-      d.nightRows.forEach(r => {
+      nightRows.forEach(r => {
         const dVColor = r.dV < -0.15 ? '#ef4444' : r.dV < -0.05 ? '#f59e0b' : '#10b981';
         const rating = r.dV > -0.05 ? '<span style="color:#10b981;">✓ Stabil</span>'
           : r.dV > -0.15 ? '<span style="color:#f59e0b;">⚠ Erhöht</span>'
