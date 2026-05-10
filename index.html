@@ -582,6 +582,11 @@
       <input id="shareUrlInput" type="text" readonly
         style="flex:1; padding:8px 12px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); color:var(--text-3); font-size:0.72rem; font-family:monospace; outline:none; min-width:0;"
         onclick="this.select()">
+      <button id="shortenBtn" onclick="App.shortenShareUrl()"
+        style="padding:8px 12px; border-radius:8px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); color:#34d399; font-size:0.82rem; font-weight:500; cursor:pointer; white-space:nowrap; flex-shrink:0;"
+        onmouseover="this.style.background='rgba(16,185,129,0.2)'" onmouseout="this.style.background='rgba(16,185,129,0.1)'">
+        Kürzen
+      </button>
       <button id="shareCopyBtn" onclick="App.copyShareUrl()"
         style="padding:8px 14px; border-radius:8px; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.3); color:#93c5fd; font-size:0.82rem; font-weight:500; cursor:pointer; white-space:nowrap; flex-shrink:0;"
         onmouseover="this.style.background='rgba(59,130,246,0.25)'" onmouseout="this.style.background='rgba(59,130,246,0.15)'">
@@ -886,11 +891,14 @@ const App = {
       const p = new URLSearchParams(location.search);
       if (p.get('view') === 'overview') {
         this.showOverview(true);
+      } else if (p.get('share')) {
+        const tab = p.get('tab');
+        this.loadShare(p.get('share')).catch(() => {});
+        // tab applied inside loadShare after render
       } else {
         const m = p.get('m') || this.manifest.months[this.manifest.months.length - 1].month;
         const tab = p.get('tab');
         if (m === this.currentMonth && tab) {
-          // same month, just switch inner tab
           this.switchInnerTab(tab, true);
         } else {
           this.switchMonth(m, true);
@@ -998,6 +1006,14 @@ const App = {
     if (shareBtn) shareBtn.style.display = data._shared ? 'none' : '';
     const clearBtn = document.getElementById('clearLocalBtn');
     if (clearBtn) clearBtn.style.display = isLocal ? '' : 'none';
+    // Auto-update browser URL to share URL for local months so it's always copy-pasteable
+    if (isLocal && !data._shared) {
+      try {
+        const shareUrl = this.buildShareUrl(data);
+        const compressed = shareUrl.split('?share=')[1];
+        history.replaceState({}, '', '?share=' + compressed);
+      } catch(e) {}
+    }
     // Shared banner
     const banner = document.getElementById('sharedBanner');
     if (banner) {
@@ -2359,6 +2375,12 @@ const App = {
 
       if (!readings || readings.length === 0) throw new Error('Keine gültigen Messwerte gefunden');
 
+      // Clear all previous local imports — each import is a clean slate
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('battery_month_')) { localStorage.removeItem(k); delete this.monthData[k.replace('battery_month_', '')]; }
+      }
+
       const byMonth = {};
       readings.forEach(r => {
         const key = localMonth(r.ts);
@@ -2406,32 +2428,52 @@ const App = {
   showHelp() { document.getElementById('helpModal').style.display = 'flex'; },
   closeHelp() { document.getElementById('helpModal').style.display = 'none'; },
 
-  shareMonth() {
-    const data = this.monthData[this.currentMonth];
-    if (!data || data._shared) return;
+  buildShareUrl(data) {
     const payload = {
-      month: data.month,
-      label: data.label,
-      summary: data.summary,
-      daily: data.daily,
+      month: data.month, label: data.label, summary: data.summary, daily: data.daily,
       hourly: data.hourly.map(h => [h.ts, h.vAvg, h.vMin, h.vMax, h.soc, h.temp, h.charging ? 1 : 0]),
       _shared: true,
     };
-    let compressed;
-    try {
-      compressed = LZString.compressToEncodedURIComponent(JSON.stringify(payload));
-    } catch(e) {
-      this.showToast('Komprimierung fehlgeschlagen', true);
-      return;
-    }
-    const url = location.origin + location.pathname + '?share=' + compressed;
+    const c = LZString.compressToEncodedURIComponent(JSON.stringify(payload));
+    return location.origin + location.pathname + '?share=' + c;
+  },
+
+  shareMonth() {
+    const data = this.monthData[this.currentMonth];
+    if (!data || data._shared) return;
+    let url;
+    try { url = this.buildShareUrl(data); }
+    catch(e) { this.showToast('Komprimierung fehlgeschlagen', true); return; }
     document.getElementById('shareUrlInput').value = url;
-    const kb = (compressed.length / 1024).toFixed(1);
-    document.getElementById('shareInfo').textContent = `URL-Größe: ${kb} KB · ${data.label} · ${data.hourly.length} Stunden-Einträge`;
+    const kb = (url.length / 1024).toFixed(1);
+    document.getElementById('shareInfo').textContent = `${kb} KB · ${data.label} · ${data.hourly.length} Stunden-Einträge`;
     document.getElementById('shareModal').style.display = 'flex';
   },
 
-  closeShare() { document.getElementById('shareModal').style.display = 'none'; },
+  closeShare() {
+    document.getElementById('shareModal').style.display = 'none';
+    document.getElementById('shortenBtn').textContent = 'Kürzen';
+    document.getElementById('shortenBtn').disabled = false;
+  },
+
+  async shortenShareUrl() {
+    const input = document.getElementById('shareUrlInput');
+    const btn   = document.getElementById('shortenBtn');
+    const url   = input.value;
+    if (url.length < 100) return; // already short
+    btn.textContent = '…'; btn.disabled = true;
+    try {
+      const r = await fetch('https://is.gd/create.php?format=simple&url=' + encodeURIComponent(url));
+      const short = (await r.text()).trim();
+      if (!short.startsWith('http')) throw new Error(short);
+      input.value = short;
+      document.getElementById('shareInfo').textContent += ' · gekürzt';
+      btn.textContent = '✓'; btn.disabled = true;
+    } catch(e) {
+      this.showToast('Kürzung fehlgeschlagen', true);
+      btn.textContent = 'Kürzen'; btn.disabled = false;
+    }
+  },
 
   async copyShareUrl() {
     const url = document.getElementById('shareUrlInput').value;
@@ -2466,6 +2508,8 @@ const App = {
       document.getElementById('loadingState').style.display = 'none';
       document.getElementById('monthView').style.display = 'block';
       this.render(raw);
+      const tabParam = new URLSearchParams(location.search).get('tab');
+      if (tabParam && tabParam !== 'uebersicht') this.switchInnerTab(tabParam, true);
     } catch(e) {
       document.getElementById('loadingState').style.display = 'flex';
       document.getElementById('loadingState').innerHTML = `
