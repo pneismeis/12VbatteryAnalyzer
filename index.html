@@ -270,13 +270,16 @@
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-5); cursor:pointer;">
+              <input type="checkbox" id="showSoc" checked onchange="App.toggleChartSeries('soc')" style="accent-color:#10b981;"> SoC
+            </label>
+            <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-5); cursor:pointer;">
               <input type="checkbox" id="showVoltage" checked onchange="App.toggleChartSeries('voltage')" style="accent-color:#a855f7;"> Spannung
             </label>
             <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-5); cursor:pointer;">
               <input type="checkbox" id="showTemp" checked onchange="App.toggleChartSeries('temp')" style="accent-color:#f97316;"> Temperatur
             </label>
             <label style="display:flex; align-items:center; gap:6px; font-size:0.78rem; color:var(--text-5); cursor:pointer;">
-              <input type="checkbox" id="showCharging" checked onchange="App.toggleChartSeries('charging')" style="accent-color:#818cf8;"> Ladeevents
+              <input type="checkbox" id="showCharging" checked onchange="App.toggleChartSeries('charging')" style="accent-color:#818cf8;"> Fahrten
             </label>
           </div>
         </div>
@@ -901,7 +904,7 @@ const App = {
     const chargingAnnotations = [];
     let chargeStart = null, chargeIdx = 0;
     hourly.forEach((h, i) => {
-      const driving = h.vMax >= 13.0;
+      const driving = h.vMax >= 14.0;
       if (driving && !chargeStart) { chargeStart = new Date(h.ts).getTime(); chargeIdx = i; }
       if (!driving && chargeStart) {
         chargingAnnotations.push({ x: chargeStart, x2: new Date(hourly[i-1].ts).getTime(),
@@ -956,7 +959,7 @@ const App = {
 
   toggleChartSeries(series) {
     if (!this.charts.main) return;
-    const map = { voltage: 'Spannung (V)', temp: 'Temperatur (°C)', charging: null };
+    const map = { soc: 'SoC (%)', voltage: 'Spannung (V)', temp: 'Temperatur (°C)' };
     if (series === 'charging') {
       const data = this.monthData[this.currentMonth];
       if (data) this.renderMainChart(data);
@@ -1061,10 +1064,10 @@ const App = {
     const tbody = document.getElementById('dailyTableBody');
     tbody.innerHTML = '';
 
-    // Build driving windows per day: consecutive hours where vMax >= 13.0V
+    // Build driving windows per day: consecutive hours where vMax >= 14.0V
     const drivingByDay = {};
     data.hourly.forEach(h => {
-      if (h.vMax < 13.0) return;
+      if (h.vMax < 14.0) return;
       const day = h.ts.slice(0,10);
       if (!drivingByDay[day]) drivingByDay[day] = [];
       drivingByDay[day].push(new Date(h.ts).getHours());
@@ -1234,8 +1237,8 @@ const App = {
     for (let i=1; i<idle.length; i++) {
       const drop = idle[i-1].vAvg - idle[i].vAvg;
       const gapH = (new Date(idle[i].ts) - new Date(idle[i-1].ts)) / 3600000;
-      // skip post-charge settling (from > 13.0V) and non-consecutive readings
-      if (drop > 0.2 && idle[i-1].vAvg <= 13.0 && gapH <= 2)
+      // skip post-charge settling (from > 14.0V) and non-consecutive readings
+      if (drop > 0.2 && idle[i-1].vAvg <= 14.0 && gapH <= 2)
         events.push({ type:'SUDDEN_DROP', severity:'warning', ts:idle[i].ts, from:idle[i-1].vAvg, to:idle[i].vAvg, drop:round(drop,3) });
     }
     idle.forEach(h => { if (h.vAvg < 11.8) events.push({ type:'CRITICAL_READING', severity:'critical', ts:h.ts, v:h.vAvg }); });
@@ -1337,7 +1340,7 @@ const App = {
 
     // Charging events by hour
     const chargeCounts = Array(24).fill(0);
-    hourly.forEach(h => { if (h.charging) chargeCounts[new Date(h.ts).getHours()]++; });
+    hourly.forEach(h => { if (h.vMax >= 14.0) chargeCounts[new Date(h.ts).getHours()]++; });
 
     // Weekday avg SoC delta (0=Mo … 6=So)
     const DOW_DE = ['Mo','Di','Mi','Do','Fr','Sa','So'];
@@ -1484,11 +1487,12 @@ const App = {
       dayHourMap[day][hr].push(h.vAvg);
     });
     const days = Object.keys(dayHourMap).sort();
+    const noDataColor = isDark ? '#1a2535' : '#e2e8f0';
     const hmSeries = days.map(day => ({
       name: day.slice(5),
       data: Array.from({length:24},(_,hr) => {
         const pts = dayHourMap[day][hr];
-        return { x: `${String(hr).padStart(2,'0')}h`, y: pts ? round(avg(pts),2) : null };
+        return { x: `${String(hr).padStart(2,'0')}h`, y: pts ? round(avg(pts),2) : -1 };
       })
     }));
 
@@ -1499,6 +1503,7 @@ const App = {
       chart:{type:'heatmap',height:Math.max(200,days.length*18+60),background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
       series: hmSeries,
       plotOptions:{heatmap:{enableShades:false,colorScale:{ranges:[
+        {from:-1,to:-0.01,color:noDataColor,name:'Keine Daten'},
         {from:0,to:11.8,color:'#dc2626',name:'Massiv'},
         {from:11.8,to:12.0,color:'#ef4444',name:'Sehr kritisch'},
         {from:12.0,to:12.2,color:'#f97316',name:'Kritisch'},
@@ -1509,7 +1514,7 @@ const App = {
       dataLabels:{enabled:false},
       xaxis:{labels:{style:{colors:tc5,fontSize:'9px'},rotate:-45}},
       yaxis:{labels:{style:{colors:tc5,fontSize:'9px'}}},
-      tooltip:{theme:themeMode,y:{formatter:v=>v?v.toFixed(2)+'V':'–'}},
+      tooltip:{theme:themeMode,y:{formatter:v=>v&&v>0?v.toFixed(2)+'V':'–'}},
       legend:{labels:{colors:tc3}},
       grid:{borderColor:tdiv},
       theme:{mode:themeMode},
