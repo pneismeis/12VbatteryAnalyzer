@@ -644,8 +644,9 @@ function round(n,d) { return Math.round(n*Math.pow(10,d))/Math.pow(10,d); }
 function pct(sorted,p){if(!sorted.length)return 0;const idx=(p/100)*(sorted.length-1);const lo=Math.floor(idx),hi=Math.ceil(idx);return lo===hi?sorted[lo]:sorted[lo]+(idx-lo)*(sorted[hi]-sorted[lo]);}
 function stddev(arr){if(arr.length<2)return 0;const m=avg(arr);return Math.sqrt(arr.reduce((s,v)=>s+(v-m)**2,0)/arr.length);}
 function pearson(xs,ys){const n=xs.length;if(n<2)return 0;const mx=avg(xs),my=avg(ys);const num=xs.reduce((s,x,i)=>s+(x-mx)*(ys[i]-my),0);const den=Math.sqrt(xs.reduce((s,x)=>s+(x-mx)**2,0)*ys.reduce((s,y)=>s+(y-my)**2,0));return den?round(num/den,3):0;}
-const V_COLOR=v=>v>=13.0?'#10b981':v>=12.7?'#84cc16':v>=12.4?'#f59e0b':v>=12.2?'#f97316':v>=12.0?'#ef4444':'#dc2626';
-const V_LABEL=v=>v>=13.0?'Gut':v>=12.7?'OK':v>=12.4?'Niedrig':v>=12.2?'Kritisch':v>=12.0?'Sehr kritisch':'Massiv';
+// Thresholds based on 12V Gel battery SOC table
+const V_COLOR=v=>v>=13.0?'#10b981':v>=12.8?'#34d399':v>=12.6?'#84cc16':v>=12.4?'#f59e0b':v>=12.2?'#f97316':v>=12.0?'#ef4444':v>=11.8?'#dc2626':'#991b1b';
+const V_LABEL=v=>v>=13.0?'Vollgeladen (100%)':v>=12.8?'Gut (90%)':v>=12.6?'OK (80%)':v>=12.4?'Niedrig (70%)':v>=12.2?'Kritisch (60%)':v>=12.0?'Sehr kritisch (50%)':v>=11.8?'Tiefentladung (40%)':'Massiv (<40%)';
 
 // ─── App ──────────────────────────────────────────────────────────────────
 const App = {
@@ -1246,8 +1247,8 @@ const App = {
 
     // Health score
     const avgV = idleVs.length ? avg(idleVs) : 12.0;
-    const vScore = avgV>=13.0?30:avgV>=12.7?24:avgV>=12.4?16:avgV>=12.2?8:0;
-    const critPct = idleVs.length ? idleVs.filter(v=>v<12.2).length/idleVs.length : 0;
+    const vScore = avgV>=13.0?30:avgV>=12.8?26:avgV>=12.6?20:avgV>=12.4?13:avgV>=12.2?6:0;
+    const critPct = idleVs.length ? idleVs.filter(v=>v<12.4).length/idleVs.length : 0;
     const critScore = critPct<0.01?20:critPct<0.05?14:critPct<0.1?8:critPct<0.2?4:0;
     const nightScore = avgNightVDrop===null?10:avgNightVDrop<0.05?20:avgNightVDrop<0.1?16:avgNightVDrop<0.15?10:avgNightVDrop<0.25?5:0;
     const dropScore = maxDrop<0.1?15:maxDrop<0.2?11:maxDrop<0.3?6:maxDrop<0.5?2:0;
@@ -1272,10 +1273,10 @@ const App = {
       rules.push({ severity:'warning', label:'Kälteproblem',
         desc:`Temp/Spannung-Korrelation: ${d.tempVCorr} — deutliche Kälteempfindlichkeit`,
         hint:'Batteriekapazität bei Kälte stark reduziert — Batterietausch erwägen' });
-    const lowVPct = d.idleVs.length ? Math.round(d.idleVs.filter(v=>v<12.7).length/d.idleVs.length*100) : 0;
+    const lowVPct = d.idleVs.length ? Math.round(d.idleVs.filter(v=>v<12.4).length/d.idleVs.length*100) : 0;
     if (lowVPct > 30)
       rules.push({ severity:'critical', label:'Alterungsverdacht',
-        desc:`${lowVPct}% der Idle-Stunden unter 12.7V — dauerhaft niedrige Ruhespannung`,
+        desc:`${lowVPct}% der Idle-Stunden unter 12.4V (≤70% SOC) — dauerhaft niedrige Ruhespannung`,
         hint:'Batteriekapazität stark reduziert — Werkstattbesuch empfohlen' });
     const suddenDrops = d.events.filter(e=>e.type==='SUDDEN_DROP').length;
     if (d.vStddev > 0.2 || suddenDrops > 3)
@@ -1504,12 +1505,14 @@ const App = {
       series: hmSeries,
       plotOptions:{heatmap:{enableShades:false,colorScale:{ranges:[
         {from:-1,to:-0.01,color:noDataColor,name:'Keine Daten'},
-        {from:0,to:12.0,color:'#dc2626',name:'Massiv'},
-        {from:12.0,to:12.2,color:'#ef4444',name:'Sehr kritisch'},
-        {from:12.2,to:12.4,color:'#f97316',name:'Kritisch'},
-        {from:12.4,to:12.7,color:'#f59e0b',name:'Niedrig'},
-        {from:12.7,to:13.0,color:'#84cc16',name:'OK'},
-        {from:13.0,to:16,color:'#10b981',name:'Gut'},
+        {from:0,to:11.8,color:'#991b1b',name:'Massiv (<40%)'},
+        {from:11.8,to:12.0,color:'#dc2626',name:'Tiefentladung (40%)'},
+        {from:12.0,to:12.2,color:'#ef4444',name:'Sehr kritisch (50%)'},
+        {from:12.2,to:12.4,color:'#f97316',name:'Kritisch (60%)'},
+        {from:12.4,to:12.6,color:'#f59e0b',name:'Niedrig (70%)'},
+        {from:12.6,to:12.8,color:'#84cc16',name:'OK (80%)'},
+        {from:12.8,to:13.0,color:'#34d399',name:'Gut (90%)'},
+        {from:13.0,to:16,color:'#10b981',name:'Vollgeladen (100%)'},
       ]}}},
       dataLabels:{enabled:false},
       xaxis:{labels:{style:{colors:tc5,fontSize:'9px'},rotate:-45}},
@@ -1523,12 +1526,14 @@ const App = {
 
     // ── Scatterplots: group by voltage band
     const V_BANDS = [
-      {label:'Gut ≥13.0V',color:'#10b981',min:13.0,max:99},
-      {label:'OK 12.7–13.0V',color:'#84cc16',min:12.7,max:13.0},
-      {label:'Niedrig 12.4–12.7V',color:'#f59e0b',min:12.4,max:12.7},
+      {label:'Vollgeladen ≥13.0V',color:'#10b981',min:13.0,max:99},
+      {label:'Gut 12.8–13.0V',color:'#34d399',min:12.8,max:13.0},
+      {label:'OK 12.6–12.8V',color:'#84cc16',min:12.6,max:12.8},
+      {label:'Niedrig 12.4–12.6V',color:'#f59e0b',min:12.4,max:12.6},
       {label:'Kritisch 12.2–12.4V',color:'#f97316',min:12.2,max:12.4},
       {label:'Sehr kritisch 12.0–12.2V',color:'#ef4444',min:12.0,max:12.2},
-      {label:'Massiv <12.0V',color:'#dc2626',min:0,max:12.0},
+      {label:'Tiefentladung 11.8–12.0V',color:'#dc2626',min:11.8,max:12.0},
+      {label:'Massiv <11.8V',color:'#991b1b',min:0,max:11.8},
     ];
     const tempSeries = V_BANDS.map(b => ({ name:b.label, color:b.color,
       data: idle.filter(h=>h.vAvg>=b.min&&h.vAvg<b.max).map(h=>({x:round(h.temp,1),y:h.vAvg})) }));
@@ -1595,11 +1600,13 @@ const App = {
       xaxis:{labels:{rotate:-45,style:{colors:tc5,fontSize:'9px'},formatter:(_,i)=>i%2===0?bpData[i]?.x:''}},
       yaxis:{min:11.5,max:13.5,decimalsInFloat:2,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(2)}},
       annotations:{yaxis:[
-        {y:13.0,borderColor:'#10b981',strokeDashArray:4,label:{text:'Gut',style:{color:'#10b981',fontSize:'9px',background:'transparent'}}},
-        {y:12.7,borderColor:'#84cc16',strokeDashArray:4,label:{text:'OK',style:{color:'#84cc16',fontSize:'9px',background:'transparent'}}},
-        {y:12.4,borderColor:'#f59e0b',strokeDashArray:4,label:{text:'Niedrig',style:{color:'#f59e0b',fontSize:'9px',background:'transparent'}}},
-        {y:12.2,borderColor:'#f97316',strokeDashArray:4,label:{text:'Kritisch',style:{color:'#f97316',fontSize:'9px',background:'transparent'}}},
-        {y:12.0,borderColor:'#ef4444',strokeDashArray:4,label:{text:'Sehr kritisch',style:{color:'#ef4444',fontSize:'9px',background:'transparent'}}},
+        {y:13.0,borderColor:'#10b981',strokeDashArray:4,label:{text:'100%',style:{color:'#10b981',fontSize:'9px',background:'transparent'}}},
+        {y:12.8,borderColor:'#34d399',strokeDashArray:4,label:{text:'90%',style:{color:'#34d399',fontSize:'9px',background:'transparent'}}},
+        {y:12.6,borderColor:'#84cc16',strokeDashArray:4,label:{text:'80%',style:{color:'#84cc16',fontSize:'9px',background:'transparent'}}},
+        {y:12.4,borderColor:'#f59e0b',strokeDashArray:4,label:{text:'70%',style:{color:'#f59e0b',fontSize:'9px',background:'transparent'}}},
+        {y:12.2,borderColor:'#f97316',strokeDashArray:4,label:{text:'60%',style:{color:'#f97316',fontSize:'9px',background:'transparent'}}},
+        {y:12.0,borderColor:'#ef4444',strokeDashArray:4,label:{text:'50%',style:{color:'#ef4444',fontSize:'9px',background:'transparent'}}},
+        {y:11.8,borderColor:'#dc2626',strokeDashArray:4,label:{text:'40%',style:{color:'#dc2626',fontSize:'9px',background:'transparent'}}},
       ]},
       tooltip:{theme:themeMode},
       grid:{borderColor:tdiv,strokeDashArray:3},
