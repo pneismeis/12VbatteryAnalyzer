@@ -339,6 +339,11 @@
     <!-- Tab: Nachtanalyse -->
     <div id="itabContent-nacht" style="display:none;">
       <div class="card card-glow" style="margin-bottom:20px;">
+        <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">Nächtliche Spannungsverläufe</div>
+        <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:6px;">Alle Nächte 22–06 Uhr überlagert — Farbe: <span style="color:#10b981;">grün</span> = stabil · <span style="color:#f59e0b;">gelb</span> = erhöht · <span style="color:#fb923c;">orange</span> = stark · <span style="color:#ef4444;">rot</span> = kritisch</div>
+        <div id="nightOverlayChart"></div>
+      </div>
+      <div class="card card-glow" style="margin-bottom:20px;">
         <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">Nacht-Vergleich</div>
         <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">22–06 Uhr ohne Ladevorgang — pro Nacht</div>
         <div class="scroll-x">
@@ -1547,8 +1552,88 @@ const App = {
     this.charts.wochenCount.render();
   },
 
+  renderNightOverlay(data) {
+    const { hourly } = data;
+    const isDark = document.documentElement.classList.contains('dark');
+    const tc4=tv('--text-4'), tc5=tv('--text-5'), tdiv=tv('--divider');
+    const themeMode = isDark?'dark':'light';
+
+    // Group idle night hours by night key (same logic as computeDiagnose)
+    const nightSet = new Set([22,23,0,1,2,3,4,5]);
+    const byNight = {};
+    hourly.forEach(h => {
+      if (!nightSet.has(new Date(h.ts).getHours()) || h.vMax >= 14.0) return;
+      const dt = new Date(h.ts), hr = dt.getHours();
+      const key = hr >= 6 ? dt.toISOString().slice(0,10)
+                           : new Date(dt.getTime()-86400000).toISOString().slice(0,10);
+      if (!byNight[key]) byNight[key] = {};
+      byNight[key][hr] = round(h.vAvg, 3);
+    });
+
+    const NIGHT_HOURS = [22,23,0,1,2,3,4,5];
+    const xLabels = ['22h','23h','00h','01h','02h','03h','04h','05h'];
+
+    // Interpolate nulls within an array
+    function interp(arr) {
+      const out = [...arr];
+      for (let i=0; i<out.length; i++) {
+        if (out[i] !== null) continue;
+        let lo=i-1, hi=i+1;
+        while (hi<out.length && out[hi]===null) hi++;
+        if (lo>=0 && hi<out.length) out[i]=round(out[lo]+(out[hi]-out[lo])*(i-lo)/(hi-lo),3);
+        else if (lo>=0) out[i]=out[lo];
+        else if (hi<out.length) out[i]=out[hi];
+      }
+      return out;
+    }
+
+    // Build one series per night, only current month, min 3 data points
+    const series = Object.entries(byNight)
+      .filter(([date]) => date.startsWith(data.month))
+      .map(([date, hourMap]) => {
+        const raw = NIGHT_HOURS.map(hr => hourMap[hr] ?? null);
+        const vals = raw.filter(v => v !== null);
+        if (vals.length < 3) return null;
+        const drop = vals[0] - vals[vals.length-1];
+        const color = drop < 0.05 ? '#10b981' : drop < 0.10 ? '#84cc16' : drop < 0.20 ? '#f59e0b' : drop < 0.35 ? '#fb923c' : '#ef4444';
+        return { name: date.slice(5), color, data: interp(raw), drop };
+      })
+      .filter(Boolean)
+      .sort((a,b) => a.name.localeCompare(b.name));
+
+    const el = document.getElementById('nightOverlayChart');
+    el.innerHTML = '';
+    if (this.charts.nightOverlay) { try{this.charts.nightOverlay.destroy();}catch(e){} }
+
+    if (!series.length) {
+      el.innerHTML = '<div style="color:var(--text-5);font-size:0.88rem;padding:16px 0;">Zu wenig Nacht-Daten.</div>';
+      return;
+    }
+
+    this.charts.nightOverlay = new ApexCharts(el, {
+      chart:{type:'line',height:280,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
+      series,
+      stroke:{curve:'smooth',width:1.5},
+      markers:{size:0},
+      colors: series.map(s=>s.color),
+      xaxis:{categories:xLabels,labels:{style:{colors:tc5,fontSize:'11px'}}},
+      yaxis:{min:11.5,max:13.5,decimalsInFloat:2,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(2)+'V'}},
+      tooltip:{
+        theme:themeMode,
+        x:{formatter:(_,{dataPointIndex:i})=>xLabels[i]},
+        y:{formatter:v=>v?v.toFixed(3)+'V':'–'},
+        shared:false,
+      },
+      legend:{show: series.length <= 15, labels:{colors:tc5}, markers:{size:6}, fontSize:'11px'},
+      grid:{borderColor:tdiv,strokeDashArray:3},
+      theme:{mode:themeMode},
+    });
+    this.charts.nightOverlay.render();
+  },
+
   renderNacht(data) {
     const d = this.computeDiagnose(data);
+    this.renderNightOverlay(data);
     // Night comparison table — only rows belonging to this month
     const nightRows = d.nightRows.filter(r => r.date.startsWith(data.month));
     const tbody = document.getElementById('nightTableBody');
