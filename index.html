@@ -2514,10 +2514,10 @@ const App = {
     const self = this;
     const DAY = 86400000;
 
-    // Filter to idle only: peak voltage < 13V
+    // Filter to idle only: peak voltage < 12.5V
     const filterIdle = src => src.filter(h => {
       const peak = h.vMax !== undefined ? h.vMax : (h.vAvg !== undefined ? h.vAvg : h.v);
-      return peak < 13.0;
+      return peak < 12.5;
     });
 
     const idleHourly  = filterIdle(data.hourly);
@@ -2549,6 +2549,13 @@ const App = {
     const defaultLabel = `${idleHourly.length} Ruhephasen-Stunden`;
     document.getElementById('entladeSubtitle').textContent = defaultLabel;
 
+    // Re-hide series that are unchecked (updateSeries resets ApexCharts visibility)
+    const reapplyVisibility = () => {
+      if (!document.getElementById('entladeShowV')?.checked)   self.charts.entlade.toggleSeries('Spannung (V)');
+      if (!document.getElementById('entladeShowSoc')?.checked) self.charts.entlade.toggleSeries('SoC (%)');
+      if (!document.getElementById('entladeShowTemp')?.checked) self.charts.entlade.toggleSeries('Temp (°C)');
+    };
+
     const el = document.getElementById('entladeChart');
     el.innerHTML = '';
     if (this.charts.entlade) { try { this.charts.entlade.destroy(); } catch(e){} }
@@ -2565,6 +2572,7 @@ const App = {
               if (!xaxis || xaxis.min == null || xaxis.max == null) return;
               const {src, label} = resolveIdle(xaxis.min, xaxis.max);
               self.charts.entlade.updateSeries(buildSeries(src), false);
+              reapplyVisibility();
               document.getElementById('entladeSubtitle').textContent = label;
             }, 50);
           },
@@ -2572,6 +2580,7 @@ const App = {
             clearTimeout(self._entladeZoomTimer);
             self._entladeZoomTimer = setTimeout(() => {
               self.charts.entlade.updateSeries(buildSeries(idleHourly), false);
+              reapplyVisibility();
               document.getElementById('entladeSubtitle').textContent = defaultLabel;
             }, 50);
           },
@@ -2581,7 +2590,7 @@ const App = {
       stroke: { curve: 'smooth', width: [1.5, 2, 1.5] },
       xaxis: { type: 'datetime', labels: { style: { colors: tc5, fontSize:'11px' }, datetimeUTC: false } },
       yaxis: [
-        { seriesName: 'Spannung (V)', title: { text: 'V', style:{color:'#a855f7',fontSize:'11px'} }, min: 11.5, max: 13.0, decimalsInFloat: 2, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(2)+'V' } },
+        { seriesName: 'Spannung (V)', title: { text: 'V', style:{color:'#a855f7',fontSize:'11px'} }, min: 11.5, max: 12.5, decimalsInFloat: 2, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(2)+'V' } },
         { seriesName: 'SoC (%)', opposite: true, title: { text: 'SoC', style:{color:'#10b981',fontSize:'11px'} }, min: 0, max: 105, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(0)+'%' } },
         { seriesName: 'Temp (°C)', show: false, min: -10, max: 60 },
       ],
@@ -2597,11 +2606,7 @@ const App = {
       grid: { borderColor: tdiv, strokeDashArray: 3 },
       theme: { mode: themeMode },
     });
-    // Render then hide SoC and Temp by default
-    this.charts.entlade.render().then(() => {
-      this.charts.entlade.toggleSeries('SoC (%)');
-      this.charts.entlade.toggleSeries('Temp (°C)');
-    });
+    this.charts.entlade.render().then(() => reapplyVisibility());
   },
 
   toggleEntladeSeries(series) {
