@@ -1566,65 +1566,55 @@ const App = {
   },
 
   renderNightOverlay(data) {
-    const src = data.subHourly || data.hourly;
-    const step = data.subHourly ? 10 : 60; // minutes per slot
     const isDark = document.documentElement.classList.contains('dark');
     const tc4=tv('--text-4'), tc5=tv('--text-5'), tdiv=tv('--divider');
     const themeMode = isDark?'dark':'light';
-    const pad2 = n => String(n).padStart(2,'0');
+    const NIGHT_HRS = new Set([22,23,0,1,2,3,4,5]);
 
-    // Build slot definitions: 8h × (60/step) slots per hour
-    const NIGHT_HRS = [22,23,0,1,2,3,4,5];
-    const slots = [];
-    for (const h of NIGHT_HRS)
-      for (let m=0; m<60; m+=step)
-        slots.push({ h, m, key:`${h}:${pad2(m)}`, label:`${pad2(h)}:${pad2(m)}` });
-    const xLabels = slots.map((s,i) => step===10 ? (i%6===0 ? s.label : '') : s.label);
-
-    // Interpolate null gaps
-    function interp(arr) {
-      const out=[...arr];
-      for(let i=0;i<out.length;i++){
-        if(out[i]!==null)continue;
-        let lo=i-1,hi=i+1;
-        while(hi<out.length&&out[hi]===null)hi++;
-        if(lo>=0&&hi<out.length)out[i]=round(out[lo]+(out[hi]-out[lo])*(i-lo)/(hi-lo),3);
-        else if(lo>=0)out[i]=out[lo];
-        else if(hi<out.length)out[i]=out[hi];
-      }
-      return out;
+    // Normalize any night-hour timestamp to a fixed reference date (2000-01-01 22:xx or 02 00:xx)
+    // so all nights share the same datetime x-axis
+    function nightX(dt) {
+      const h = dt.getHours(), m = dt.getMinutes();
+      return h >= 6
+        ? new Date(2000,0,1,h,m).getTime()   // 22h–23h → Jan 1
+        : new Date(2000,0,2,h,m).getTime();  // 00h–05h → Jan 2
     }
 
-    // Group readings by night date + slot key
+    // --- prefer raw readings, fallback to subHourly, then hourly ---
+    const src = data.readings || data.subHourly || data.hourly;
+    const isRaw = !!data.readings;
+    const vKey = isRaw ? 'v' : 'vAvg';
+    const drivingKey = isRaw ? null : 'vMax'; // raw has no vMax field
+
     const byNight = {};
-    src.forEach(h => {
-      const dt = new Date(h.ts), hr = dt.getHours();
-      if (!NIGHT_HRS.includes(hr) || h.vMax >= 14.0) return;
-      const nightDate = hr >= 6 ? dt.toISOString().slice(0,10)
-                                 : new Date(dt.getTime()-86400000).toISOString().slice(0,10);
+    src.forEach(r => {
+      const dt = new Date(r.ts), hr = dt.getHours();
+      if (!NIGHT_HRS.has(hr)) return;
+      // skip driving hours (raw: use v threshold; hourly: use vMax)
+      const peakV = isRaw ? r.v : r.vMax;
+      if (peakV >= 14.0) return;
+      const nightDate = hr >= 6
+        ? r.ts.slice(0,10)
+        : new Date(dt.getTime()-86400000).toISOString().slice(0,10);
       if (!nightDate.startsWith(data.month)) return;
-      if (!byNight[nightDate]) byNight[nightDate] = {};
-      const slotKey = `${hr}:${pad2(Math.floor(dt.getMinutes()/step)*step)}`;
-      if (!byNight[nightDate][slotKey]) byNight[nightDate][slotKey] = [];
-      byNight[nightDate][slotKey].push(h.vAvg);
+      if (!byNight[nightDate]) byNight[nightDate] = [];
+      byNight[nightDate].push({ x: nightX(dt), y: r[vKey] });
     });
 
     const series = Object.entries(byNight)
-      .map(([date, slotMap]) => {
-        const raw = slots.map(s => {
-          const vs = slotMap[s.key];
-          return vs ? round(vs.reduce((a,b)=>a+b,0)/vs.length, 3) : null;
-        });
-        const vals = raw.filter(v => v !== null);
-        if (vals.length < 3) return null;
-        const drop = vals[0] - vals[vals.length-1];
+      .map(([date, pts]) => {
+        pts.sort((a,b) => a.x - b.x);
+        if (pts.length < 3) return null;
+        const drop = pts[0].y - pts[pts.length-1].y;
         const color = drop < 0.05 ? '#10b981' : drop < 0.10 ? '#84cc16' : drop < 0.20 ? '#f59e0b' : drop < 0.35 ? '#fb923c' : '#ef4444';
-        return { name: date.slice(5), color, data: interp(raw), drop };
+        return { name: date.slice(5), color, data: pts, drop };
       })
       .filter(Boolean)
       .sort((a,b) => a.name.localeCompare(b.name));
 
     const el = document.getElementById('nightOverlayChart');
+    // remove previous resolution label if any
+    document.getElementById('nightOverlayRes')?.remove();
     el.innerHTML = '';
     if (this.charts.nightOverlay) { try{this.charts.nightOverlay.destroy();}catch(e){} }
 
@@ -1633,24 +1623,21 @@ const App = {
       return;
     }
 
-    const resLabel = step === 10 ? '10-Minuten-Auflösung' : 'Stunden-Auflösung (kein Sub-Minuten-Import)';
+    const resLabel = isRaw ? `~${Math.round(src.filter(r=>{const h=new Date(r.ts).getHours();return NIGHT_HRS.has(h);}).length / series.length)} Datenpunkte/Nacht`
+                           : data.subHourly ? '10-Min-Auflösung' : 'Stunden-Auflösung';
     el.insertAdjacentHTML('beforebegin',
-      `<div id="nightOverlayRes" style="font-size:0.7rem;color:var(--text-6);margin-bottom:6px;">Auflösung: ${resLabel}</div>`);
+      `<div id="nightOverlayRes" style="font-size:0.7rem;color:var(--text-6);margin-bottom:6px;">${resLabel}</div>`);
 
     this.charts.nightOverlay = new ApexCharts(el, {
       chart:{type:'line',height:300,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
       series,
-      stroke:{curve:'smooth',width:step===10?1:1.5},
+      stroke:{curve:'smooth',width:isRaw?1:1.5},
       markers:{size:0},
       colors: series.map(s=>s.color),
-      xaxis:{categories:xLabels,labels:{style:{colors:tc5,fontSize:'10px'},rotate:step===10?-45:0}},
+      xaxis:{type:'datetime',min:new Date(2000,0,1,22,0).getTime(),max:new Date(2000,0,2,6,0).getTime(),
+        labels:{style:{colors:tc5,fontSize:'10px'},datetimeUTC:false,format:'HH:mm'}},
       yaxis:{min:11.5,max:13.5,decimalsInFloat:2,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(2)+'V'}},
-      tooltip:{
-        theme:themeMode,
-        x:{formatter:(_,{dataPointIndex:i})=>slots[i].label},
-        y:{formatter:v=>v?v.toFixed(3)+'V':'–'},
-        shared:false,
-      },
+      tooltip:{theme:themeMode,x:{format:'HH:mm'},y:{formatter:v=>v?v.toFixed(3)+'V':'–'},shared:false},
       legend:{show:series.length<=15,labels:{colors:tc5},markers:{size:6},fontSize:'11px'},
       grid:{borderColor:tdiv,strokeDashArray:3},
       theme:{mode:themeMode},
@@ -2437,6 +2424,14 @@ const App = {
       const tc4=tv('--text-4'), tc5=tv('--text-5'), tc3=tv('--text-3'), tdiv=tv('--divider');
       const themeMode = isDark?'dark':'light';
 
+      // Use raw per-minute readings for the chart if available; fall back to hourly
+      const rawDay = data.readings
+        ? data.readings.filter(r => r.ts.slice(0,10) === date)
+        : null;
+      const chartPts = rawDay || dayHours;
+      const isRaw = !!rawDay;
+
+      // Driving annotations (from hourly — raw has no vMax)
       const annotations = [];
       let driveStart = null;
       dayHours.forEach((h, i) => {
@@ -2453,33 +2448,32 @@ const App = {
         fillColor:'rgba(129,140,248,0.12)', borderColor:'transparent',
         label:{text:'Fahrt',style:{color:'#818cf8',background:'transparent',fontSize:'10px',fontWeight:600},offsetY:-4} });
 
+      const vSeriesName = isRaw ? 'Spannung (V)' : 'V ⌀';
+      const series = [
+        {name:'SoC (%)',  data:chartPts.map(r=>[new Date(r.ts).getTime(), isRaw?r.soc:r.soc]),  color:'#10b981'},
+        {name:vSeriesName,data:chartPts.map(r=>[new Date(r.ts).getTime(), isRaw?r.v:r.vAvg]),   color:'#a855f7'},
+        {name:'Temp (°C)',data:chartPts.map(r=>[new Date(r.ts).getTime(), isRaw?r.temp:r.temp]), color:'#f97316'},
+      ];
+      // hourly-only: also show V Min / V Max bands
+      if (!isRaw) {
+        series.push({name:'V Min',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.vMin]),color:'#c084fc'});
+        series.push({name:'V Max',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.vMax]),color:'#7c3aed'});
+      }
+
       if (this.charts.dayChart) { try{this.charts.dayChart.destroy();}catch(e){} }
       this.charts.dayChart = new ApexCharts(document.getElementById('dayChartContainer'), {
         chart:{type:'line',height:280,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
-        series:[
-          {name:'SoC (%)',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.soc]),color:'#10b981'},
-          {name:'V ⌀',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.vAvg]),color:'#a855f7'},
-          {name:'V Min',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.vMin]),color:'#c084fc'},
-          {name:'V Max',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.vMax]),color:'#7c3aed'},
-          {name:'Temperatur (°C)',data:dayHours.map(h=>[new Date(h.ts).getTime(),h.temp]),color:'#f97316'},
-        ],
-        stroke:{curve:'smooth',width:[2,1.5,1,1,1.5],dashArray:[0,0,4,4,0]},
+        series,
+        stroke:{curve:'smooth',width:isRaw?[1.5,1.5,1]:[2,1.5,1.5,1,1],dashArray:isRaw?[0,0,0]:[0,0,0,4,4]},
         xaxis:{type:'datetime',labels:{style:{colors:tc5,fontSize:'10px'},datetimeUTC:false,format:'HH:mm'}},
         yaxis:[
-          {seriesName:'SoC (%)',title:{text:'SoC (%)',style:{color:'#10b981',fontSize:'10px'}},min:0,max:105,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(0)+'%'}},
-          {seriesName:'V ⌀',opposite:true,title:{text:'V',style:{color:'#a855f7',fontSize:'10px'}},min:11.0,max:16.0,decimalsInFloat:2,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(1)+'V'}},
-          {seriesName:'V Min',show:false,min:11.0,max:16.0},
-          {seriesName:'V Max',show:false,min:11.0,max:16.0},
-          {seriesName:'Temperatur (°C)',show:false,min:-10,max:60},
+          {seriesName:'SoC (%)',title:{text:'SoC %',style:{color:'#10b981',fontSize:'10px'}},min:0,max:105,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(0)+'%'}},
+          {seriesName:vSeriesName,opposite:true,title:{text:'V',style:{color:'#a855f7',fontSize:'10px'}},min:11.0,max:16.0,decimalsInFloat:2,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(1)+'V'}},
+          {seriesName:'Temp (°C)',show:false,min:-10,max:60},
+          ...(!isRaw?[{seriesName:'V Min',show:false,min:11.0,max:16.0},{seriesName:'V Max',show:false,min:11.0,max:16.0}]:[]),
         ],
         annotations:{xaxis:annotations},
-        tooltip:{theme:themeMode,x:{format:'HH:mm'},y:[
-          {formatter:v=>v?v.toFixed(1)+'%':'-'},
-          {formatter:v=>v?v.toFixed(3)+'V':'-'},
-          {formatter:v=>v?v.toFixed(3)+'V':'-'},
-          {formatter:v=>v?v.toFixed(3)+'V':'-'},
-          {formatter:v=>v?v.toFixed(1)+'°C':'-'},
-        ]},
+        tooltip:{theme:themeMode,x:{format:'HH:mm'},y:series.map((_,i)=>({formatter:v=>v?(i===0?v.toFixed(1)+'%':i===2?v.toFixed(1)+'°C':v.toFixed(3)+'V'):'-'}))},
         legend:{labels:{colors:tc3},markers:{size:5}},
         grid:{borderColor:tdiv,strokeDashArray:3},
         theme:{mode:themeMode},

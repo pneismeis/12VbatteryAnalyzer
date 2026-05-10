@@ -192,13 +192,20 @@ def build_month_json(readings, month_key):
                    'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember']
     label = f"{month_names[int(month)]} {year}"
 
+    # Raw readings (per-minute resolution) for high-detail views
+    readings = [
+        {'ts': ts.strftime('%Y-%m-%dT%H:%M'), 'v': round(v, 3), 'soc': soc, 'temp': round(t, 1)}
+        for ts, v, soc, t in clean
+    ]
+
     return {
         'month': month_key,
         'label': label,
-        'device': 'VW ID.3 12V',
+        'device': 'VW ID / Cupra Born 12V',
         'summary': summary,
         'daily': daily,
         'hourly': hourly,
+        'readings': readings,
     }
 
 def update_manifest(data_dir, month_key, label):
