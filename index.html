@@ -161,8 +161,16 @@
     .modal-close:hover { background: var(--surface3); }
 
     @media (max-width: 768px) {
-      .stat-value { font-size: 1.8rem; }
-      .card { padding: 14px; }
+      .stat-value { font-size: 1.6rem; }
+      .card { padding: 12px; }
+      .card-glow { box-shadow: none; }
+    }
+    @media (max-width: 600px) {
+      #statsGrid { grid-template-columns: 1fr 1fr !important; }
+      .inner-tab-nav .tab-btn { padding: 5px 10px; font-size: 0.78rem; }
+      main { padding: 12px 12px 40px !important; }
+      .soc-bar-track { display: none; }
+      .two-col-grid { grid-template-columns: 1fr !important; }
     }
     .inner-tab-nav { display:flex; gap:4px; margin-bottom:20px; border-bottom:1px solid var(--divider); padding-bottom:2px; overflow-x:auto; }
     .diag-card { border-radius:12px; padding:16px; margin-bottom:12px; }
@@ -274,7 +282,7 @@
         </div>
         <div id="mainChart"></div>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;" class="two-col-grid">
         <div class="card card-glow">
           <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">SoC Kalender</div>
           <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">Tagesendzustand — blauer Rahmen = geladen</div>
@@ -301,7 +309,8 @@
           <table>
             <thead><tr>
               <th>Tag</th><th>SoC Start → End</th><th>SoC Bereich</th>
-              <th>Idle Spannung ⌀</th><th>Max Spannung</th><th>Temperatur ⌀</th><th>Laden</th>
+              <th>Idle V ⌀</th><th>Temp ⌀</th>
+              <th title="Stunden mit Spannung ≥13V = Auto gefahren / geladen">Fahrten <span style="color:var(--text-6);font-size:0.68rem;">(≥13V)</span></th>
             </tr></thead>
             <tbody id="dailyTableBody"></tbody>
           </table>
@@ -324,7 +333,7 @@
           </table>
         </div>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;" class="two-col-grid">
         <div class="card card-glow">
           <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">Spannung nach Uhrzeit</div>
           <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">Ø Leerlauf-Spannung und SoC pro Stunde</div>
@@ -336,7 +345,7 @@
           <div id="chargingByHourChart"></div>
         </div>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;" class="two-col-grid">
         <div class="card card-glow">
           <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">SoC-Änderung nach Wochentag</div>
           <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">Ø Tagesdelta — grün = Gewinn, rot = Verlust</div>
@@ -353,7 +362,7 @@
         <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">Ø Leerlauf-Spannung — Farbe nach Schwellenwert</div>
         <div id="heatmapChart"></div>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;" class="two-col-grid">
         <div class="card card-glow">
           <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">Temperatur vs. Spannung</div>
           <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">Farbe = Spannungsniveau</div>
@@ -365,7 +374,7 @@
           <div id="socVScatter"></div>
         </div>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;" class="two-col-grid">
         <div class="card card-glow">
           <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">Spannungsverteilung</div>
           <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">Histogramm in 0.1V-Schritten (Leerlauf)</div>
@@ -436,7 +445,7 @@
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px;">
         <div>
           <div style="font-size:1.15rem; font-weight:700; color:var(--text-1);">Bericht importieren</div>
-          <div style="font-size:0.8rem; color:var(--text-5); margin-top:3px;">XLS oder CSV aus der ID.3 App</div>
+          <div style="font-size:0.8rem; color:var(--text-5); margin-top:3px;">XLS Export der <strong>Battery Check</strong>-App (Play Store)</div>
         </div>
         <button class="modal-close" onclick="App.closeImport()">×</button>
       </div>
@@ -890,15 +899,20 @@ const App = {
     const tempSeries = hourly.map(h => [new Date(h.ts).getTime(), h.temp]);
 
     const chargingAnnotations = [];
-    let chargeStart = null;
+    let chargeStart = null, chargeIdx = 0;
     hourly.forEach((h, i) => {
-      if (h.charging && !chargeStart) chargeStart = new Date(h.ts).getTime();
-      if (!h.charging && chargeStart) {
-        chargingAnnotations.push({ x: chargeStart, x2: new Date(hourly[i-1].ts).getTime(), fillColor:'rgba(129,140,248,0.08)', borderColor:'transparent' });
+      const driving = h.vMax >= 13.0;
+      if (driving && !chargeStart) { chargeStart = new Date(h.ts).getTime(); chargeIdx = i; }
+      if (!driving && chargeStart) {
+        chargingAnnotations.push({ x: chargeStart, x2: new Date(hourly[i-1].ts).getTime(),
+          fillColor:'rgba(129,140,248,0.1)', borderColor:'transparent',
+          label:{ text:'Fahrt', style:{ color:'#818cf8', background:'transparent', fontSize:'10px', fontWeight:600 }, offsetY: -4 } });
         chargeStart = null;
       }
     });
-    if (chargeStart) chargingAnnotations.push({ x: chargeStart, x2: new Date(hourly[hourly.length-1].ts).getTime(), fillColor:'rgba(129,140,248,0.08)', borderColor:'transparent' });
+    if (chargeStart) chargingAnnotations.push({ x: chargeStart, x2: new Date(hourly[hourly.length-1].ts).getTime(),
+      fillColor:'rgba(129,140,248,0.1)', borderColor:'transparent',
+      label:{ text:'Fahrt', style:{ color:'#818cf8', background:'transparent', fontSize:'10px', fontWeight:600 }, offsetY: -4 } });
 
     const isDark = document.documentElement.classList.contains('dark');
     const tc4 = tv('--text-4'), tc5 = tv('--text-5'), tc3 = tv('--text-3'), tdiv = tv('--divider');
@@ -1047,6 +1061,23 @@ const App = {
     const tbody = document.getElementById('dailyTableBody');
     tbody.innerHTML = '';
 
+    // Build driving windows per day: consecutive hours where vMax >= 13.0V
+    const drivingByDay = {};
+    data.hourly.forEach(h => {
+      if (h.vMax < 13.0) return;
+      const day = h.ts.slice(0,10);
+      if (!drivingByDay[day]) drivingByDay[day] = [];
+      drivingByDay[day].push(new Date(h.ts).getHours());
+    });
+    function toRanges(hrs) {
+      if (!hrs.length) return [];
+      const s = [...new Set(hrs)].sort((a,b)=>a-b);
+      const out = []; let lo=s[0], hi=s[0];
+      for (let i=1;i<s.length;i++) { if(s[i]===hi+1)hi=s[i]; else{out.push([lo,hi]);lo=s[i];hi=s[i];} }
+      out.push([lo,hi]);
+      return out.map(([a,b])=>`${String(a).padStart(2,'0')}–${String(b+1).padStart(2,'0')} Uhr`);
+    }
+
     const sortedDays = [...data.daily].reverse();
     sortedDays.forEach(d => {
       const tr = document.createElement('tr');
@@ -1054,9 +1085,12 @@ const App = {
       const deltaStr = (socDelta >= 0 ? '+' : '') + socDelta.toFixed(1) + '%';
       const deltaColor = socDelta >= 0 ? '#10b981' : '#f87171';
       const endSocColor = d.socEnd > 70 ? '#10b981' : d.socEnd > 50 ? '#f59e0b' : '#ef4444';
-      const vColor = d.vIdleAvg >= 12.4 ? 'var(--text-3)' : d.vIdleAvg >= 12.0 ? '#f59e0b' : '#ef4444';
-      const vMaxColor = d.vMax >= 13.5 ? '#818cf8' : 'var(--text-3)';
-      const [yyyy, mm, dd] = d.date.split('-');
+      const vColor = V_COLOR(d.vIdleAvg);
+      const [, mm, dd] = d.date.split('-');
+      const ranges = toRanges(drivingByDay[d.date] || []);
+      const drivingHtml = ranges.length
+        ? ranges.map(r=>`<span style="display:inline-block;font-size:0.75rem;color:#818cf8;white-space:nowrap;">⚡ ${r}</span>`).join('<br>')
+        : `<span style="color:var(--text-6);font-size:0.76rem;" title="Auto stand still — kein Ladeimpuls über 13V">Auto nicht bewegt</span>`;
 
       tr.innerHTML = `
         <td style="font-weight:500; color:var(--text-2);">${dd}.${mm}.</td>
@@ -1070,11 +1104,8 @@ const App = {
           <span style="color:${d.socMin < 50 ? '#ef4444' : 'var(--text-5)'}">${d.socMin.toFixed(0)}</span>–<span>${d.socMax.toFixed(0)}%</span>
         </td>
         <td style="color:${vColor}; font-family:monospace; font-size:0.85rem;">${d.vIdleAvg.toFixed(3)} V</td>
-        <td style="color:${vMaxColor}; font-family:monospace; font-size:0.85rem;">${d.vMax.toFixed(2)} V</td>
         <td style="color:#f97316;">${d.tempAvg.toFixed(1)}<span style="color:var(--text-6); font-size:0.78rem;"> °C</span></td>
-        <td>${d.charged
-          ? `<span class="badge badge-blue">⚡ ${d.chargingHours}h</span>`
-          : `<span style="color:var(--text-6); font-size:0.78rem;">–</span>`}</td>
+        <td>${drivingHtml}</td>
       `;
       tbody.appendChild(tr);
     });
