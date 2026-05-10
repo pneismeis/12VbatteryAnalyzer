@@ -690,6 +690,9 @@ const MONTH_MAP = {
   'Jan':1,'Feb':2,'Mar':3,'Apr':4,'May':5,'Jun':6,
   'Jul':7,'Aug':8,'Sep':9,'Oct':10,'Nov':11,'Dec':12,
 };
+// Set to your Cloudflare Worker URL after deploying worker/ — see worker/README.md
+const SHARE_API = '';
+
 const MONTH_NAMES_DE = ['','Jänner','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
 const MONTH_SHORT_DE = ['','Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
 
@@ -892,8 +895,9 @@ const App = {
     }
 
     const params = new URLSearchParams(location.search);
+    if (SHARE_API && location.hash.startsWith('#id=')) { await this.loadShareById(location.hash.slice(4)); return; }
     const hashShare = location.hash.startsWith('#share=') ? location.hash.slice(7) : null;
-    const shareParam = hashShare || params.get('share'); // params.get fallback for old links
+    const shareParam = hashShare || params.get('share');
     if (shareParam) { await this.loadShare(shareParam); return; }
     if (params.get('view') === 'overview') {
       await this.showOverview(true);
@@ -909,6 +913,8 @@ const App = {
       const p = new URLSearchParams(location.search);
       if (p.get('view') === 'overview') {
         this.showOverview(true);
+      } else if (SHARE_API && location.hash.startsWith('#id=')) {
+        this.loadShareById(location.hash.slice(4)).catch(() => {});
       } else if (location.hash.startsWith('#share=') || p.get('share')) {
         const encoded = location.hash.startsWith('#share=') ? location.hash.slice(7) : p.get('share');
         this.loadShare(encoded).catch(() => {});
@@ -1026,13 +1032,16 @@ const App = {
     if (shareBtn) shareBtn.style.display = data._shared ? 'none' : '';
     const clearBtn = document.getElementById('clearLocalBtn');
     if (clearBtn) clearBtn.style.display = isLocal ? '' : 'none';
-    // Auto-update browser URL to share fragment for local months
+    // Auto-update browser URL for local months
     if (isLocal && !data._shared) {
-      try {
-        const shareUrl = this.buildShareUrl(data);
-        const fragment = '#' + shareUrl.split('#')[1];
-        history.replaceState({}, '', fragment);
-      } catch(e) {}
+      if (SHARE_API && location.hash.startsWith('#id=')) {
+        // already has a short ID in the URL — keep it
+      } else {
+        try {
+          const shareUrl = this.buildShareUrl(data);
+          history.replaceState({}, '', '#' + shareUrl.split('#')[1]);
+        } catch(e) {}
+      }
     }
     // Shared banner
     const banner = document.getElementById('sharedBanner');
@@ -2473,19 +2482,60 @@ const App = {
     return location.origin + location.pathname + '#share=' + c;
   },
 
-  shareMonth() {
+  async shareMonth() {
     const data = this.monthData[this.currentMonth];
     if (!data || data._shared) return;
-    let url;
-    try { url = this.buildShareUrl(data); }
-    catch(e) { this.showToast('Komprimierung fehlgeschlagen', true); return; }
+    const btn = document.getElementById('shareBtn');
+    btn.disabled = true;
+    let url, info;
+    try {
+      const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(this.buildSharePayload(data)));
+      if (SHARE_API) {
+        // Upload to Worker → get short ID
+        const r = await fetch(SHARE_API + '/share', {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: compressed,
+        });
+        if (!r.ok) throw new Error(`Worker: HTTP ${r.status}`);
+        const { id } = await r.json();
+        url = location.origin + location.pathname + '#id=' + id;
+        info = `ID: ${id} · ${data.label}`;
+      } else {
+        // Fallback: full compressed fragment (~8 KB)
+        url = location.origin + location.pathname + '#share=' + compressed;
+        info = `${(url.length / 1024).toFixed(1)} KB · ${data.label} · Worker nicht konfiguriert`;
+      }
+    } catch(e) {
+      this.showToast('Fehler: ' + e.message, true);
+      btn.disabled = false;
+      return;
+    }
+    btn.disabled = false;
     document.getElementById('shareUrlInput').value = url;
-    const kb = (url.length / 1024).toFixed(1);
-    document.getElementById('shareInfo').textContent = `${kb} KB · ${data.label} · ${data.hourly.length} Stunden-Einträge`;
+    document.getElementById('shareInfo').textContent = info;
     document.getElementById('shareModal').style.display = 'flex';
   },
 
   closeShare() { document.getElementById('shareModal').style.display = 'none'; },
+
+  async loadShareById(id) {
+    document.getElementById('loadingState').style.display = 'flex';
+    document.getElementById('monthView').style.display = 'none';
+    try {
+      const r = await fetch(SHARE_API + '/share/' + id);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const compressed = (await r.text()).trim();
+      await this.loadShare(compressed);
+    } catch(e) {
+      document.getElementById('loadingState').innerHTML = `
+        <div style="text-align:center;">
+          <div style="font-size:2.5rem; margin-bottom:16px;">⚠️</div>
+          <div style="font-size:1rem; font-weight:600; color:var(--text-1); margin-bottom:8px;">Link nicht ladbar</div>
+          <div style="font-size:0.82rem; color:var(--text-5);">${e.message}</div>
+        </div>`;
+    }
+  },
 
 
   async copyShareUrl() {
