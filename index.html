@@ -577,18 +577,13 @@
       <button class="modal-close" onclick="App.closeShare()">×</button>
     </div>
     <div style="font-size:0.82rem; color:var(--text-4); margin-bottom:14px; line-height:1.6;">
-      Dieser Link ist komprimiert und selbst-enthaltend.<br>
-      Für Foren-Posts empfiehlt sich ein URL-Kürzer wie <strong style="color:var(--text-3);">bit.ly</strong> oder <strong style="color:var(--text-3);">TinyURL</strong>.
+      Dieser Link ist komprimiert und selbst-enthaltend — kein Server nötig.<br>
+      Der Link ist lang (~8 KB), funktioniert aber direkt in Browsern, Discord, Telegram und Forum-Posts.
     </div>
     <div style="display:flex; gap:8px; margin-bottom:10px;">
       <input id="shareUrlInput" type="text" readonly
         style="flex:1; padding:8px 12px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); color:var(--text-3); font-size:0.72rem; font-family:monospace; outline:none; min-width:0;"
         onclick="this.select()">
-      <button id="shortenBtn" onclick="App.shortenShareUrl()"
-        style="padding:8px 12px; border-radius:8px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); color:#34d399; font-size:0.82rem; font-weight:500; cursor:pointer; white-space:nowrap; flex-shrink:0;"
-        onmouseover="this.style.background='rgba(16,185,129,0.2)'" onmouseout="this.style.background='rgba(16,185,129,0.1)'">
-        Kürzen
-      </button>
       <button id="shareCopyBtn" onclick="App.copyShareUrl()"
         style="padding:8px 14px; border-radius:8px; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.3); color:#93c5fd; font-size:0.82rem; font-weight:500; cursor:pointer; white-space:nowrap; flex-shrink:0;"
         onmouseover="this.style.background='rgba(59,130,246,0.25)'" onmouseout="this.style.background='rgba(59,130,246,0.15)'">
@@ -897,7 +892,6 @@ const App = {
     }
 
     const params = new URLSearchParams(location.search);
-    if (location.hash.startsWith('#paste=')) { await this.loadPaste(location.hash.slice(7)); return; }
     const hashShare = location.hash.startsWith('#share=') ? location.hash.slice(7) : null;
     const shareParam = hashShare || params.get('share'); // params.get fallback for old links
     if (shareParam) { await this.loadShare(shareParam); return; }
@@ -915,8 +909,6 @@ const App = {
       const p = new URLSearchParams(location.search);
       if (p.get('view') === 'overview') {
         this.showOverview(true);
-      } else if (location.hash.startsWith('#paste=')) {
-        this.loadPaste(location.hash.slice(7)).catch(() => {});
       } else if (location.hash.startsWith('#share=') || p.get('share')) {
         const encoded = location.hash.startsWith('#share=') ? location.hash.slice(7) : p.get('share');
         this.loadShare(encoded).catch(() => {});
@@ -2493,58 +2485,8 @@ const App = {
     document.getElementById('shareModal').style.display = 'flex';
   },
 
-  closeShare() {
-    document.getElementById('shareModal').style.display = 'none';
-    document.getElementById('shortenBtn').textContent = 'Kürzen';
-    document.getElementById('shortenBtn').disabled = false;
-  },
+  closeShare() { document.getElementById('shareModal').style.display = 'none'; },
 
-  async shortenShareUrl() {
-    const input = document.getElementById('shareUrlInput');
-    const btn   = document.getElementById('shortenBtn');
-    const url   = input.value;
-    if (!url.includes('#share=')) return;
-    btn.textContent = '…'; btn.disabled = true;
-    try {
-      const compressed = url.split('#share=')[1];
-      const r = await fetch('https://paste.rs/', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'text/plain' },
-        body: compressed,
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const pasteUrl = (await r.text()).trim();
-      // pasteUrl is like "https://paste.rs/AbCd"
-      const pasteId = pasteUrl.replace(/^https?:\/\/paste\.rs\//, '');
-      if (!pasteId) throw new Error('Ungültige Antwort');
-      const shortUrl = location.origin + location.pathname + '#paste=' + encodeURIComponent(pasteId);
-      input.value = shortUrl;
-      document.getElementById('shareInfo').textContent += ' · ' + shortUrl.length + ' Zeichen';
-      btn.textContent = '✓'; btn.disabled = true;
-    } catch(e) {
-      this.showToast('Kürzung fehlgeschlagen: ' + e.message, true);
-      btn.textContent = 'Kürzen'; btn.disabled = false;
-    }
-  },
-
-  async loadPaste(pasteId) {
-    document.getElementById('loadingState').style.display = 'flex';
-    document.getElementById('monthView').style.display = 'none';
-    try {
-      const r = await fetch('https://paste.rs/' + decodeURIComponent(pasteId));
-      if (!r.ok) throw new Error(`Datei nicht gefunden (${r.status})`);
-      const compressed = (await r.text()).trim();
-      await this.loadShare(compressed);
-    } catch(e) {
-      document.getElementById('loadingState').style.display = 'flex';
-      document.getElementById('loadingState').innerHTML = `
-        <div style="text-align:center;">
-          <div style="font-size:2.5rem; margin-bottom:16px;">⚠️</div>
-          <div style="font-size:1rem; font-weight:600; color:var(--text-1); margin-bottom:8px;">Link nicht ladbar</div>
-          <div style="font-size:0.82rem; color:var(--text-5);">${e.message}</div>
-        </div>`;
-    }
-  },
 
   async copyShareUrl() {
     const url = document.getElementById('shareUrlInput').value;
