@@ -1243,20 +1243,21 @@ const App = {
         zoom: { enabled: true }, animations: { enabled: false },
         foreColor: tc4,
         events: {
-          zoomed(ctx, {xaxis}) {
-            if (self._mainZoomLock) return;
-            self._mainZoomLock = true;
-            const {src, label} = resolveSource(xaxis.min, xaxis.max);
-            ctx.updateSeries(buildSeries(src), false);
-            document.getElementById('chartSubtitle').textContent = label;
-            self._mainZoomLock = false;
+          zoomed(_ctx, {xaxis}) {
+            clearTimeout(self._zoomTimer);
+            self._zoomTimer = setTimeout(() => {
+              if (!xaxis || xaxis.min == null || xaxis.max == null) return;
+              const {src, label} = resolveSource(xaxis.min, xaxis.max);
+              self.charts.main.updateSeries(buildSeries(src), false);
+              document.getElementById('chartSubtitle').textContent = label;
+            }, 50);
           },
-          beforeResetZoom(ctx) {
-            if (self._mainZoomLock) return;
-            self._mainZoomLock = true;
-            ctx.updateSeries(buildSeries(hourly), false);
-            document.getElementById('chartSubtitle').textContent = defaultSubtitle;
-            self._mainZoomLock = false;
+          beforeResetZoom() {
+            clearTimeout(self._zoomTimer);
+            self._zoomTimer = setTimeout(() => {
+              self.charts.main.updateSeries(buildSeries(hourly), false);
+              document.getElementById('chartSubtitle').textContent = defaultSubtitle;
+            }, 50);
           },
         },
       },
