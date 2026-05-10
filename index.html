@@ -993,7 +993,7 @@ const App = {
         if (!p.get('tab')) p.delete('tab');
         history.pushState({}, '', '?' + p.toString());
       }
-      // For local months render() will replaceState with #share=... fragment
+      // For local months render() will clear any share hash
     }
 
     document.getElementById('loadingState').style.display = 'flex';
@@ -1037,15 +1037,10 @@ const App = {
     if (shareBtn) shareBtn.style.display = (FEATURES.share && !data._shared) ? '' : 'none';
     const clearBtn = document.getElementById('clearLocalBtn');
     if (clearBtn) clearBtn.style.display = (FEATURES.import && isLocal) ? '' : 'none';
-    // Auto-update browser URL for local months
+    // Clear any share hash for local months — local data stays local
     if (isLocal && !data._shared) {
-      if (SHARE_API && location.hash.startsWith('#id=')) {
-        // already has a short ID in the URL — keep it
-      } else {
-        try {
-          const shareUrl = this.buildShareUrl(data);
-          history.replaceState({}, '', '#' + shareUrl.split('#')[1]);
-        } catch(e) {}
+      if (location.hash.startsWith('#share=') || location.hash.startsWith('#id=')) {
+        history.replaceState({}, '', location.pathname + location.search);
       }
     }
     // Shared banner
