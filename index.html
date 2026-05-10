@@ -263,6 +263,7 @@
     <div class="inner-tab-nav">
       <button class="tab-btn active" id="itab-uebersicht" onclick="App.switchInnerTab('uebersicht')">Übersicht</button>
       <button class="tab-btn" id="itab-nacht" onclick="App.switchInnerTab('nacht')">Nachtanalyse</button>
+      <button class="tab-btn" id="itab-wochenprofil" onclick="App.switchInnerTab('wochenprofil')">Wochenprofil</button>
       <button class="tab-btn" id="itab-ruhetage" onclick="App.switchInnerTab('ruhetage')">Standtage</button>
       <button class="tab-btn" id="itab-tiefen" onclick="App.switchInnerTab('tiefen')">Tiefenanalyse</button>
       <button class="tab-btn" id="itab-ereignisse" onclick="App.switchInnerTab('ereignisse')">Ereignisse</button>
@@ -371,6 +372,25 @@
         <div class="card card-glow" id="nightDriftCard"></div>
       </div>
     </div><!-- /nacht -->
+
+    <!-- Tab: Wochenprofil -->
+    <div id="itabContent-wochenprofil" style="display:none;">
+      <div class="card card-glow" style="margin-bottom:20px;">
+        <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">Spannungsprofil nach Wochentag</div>
+        <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">Ø Leerlauf-Spannung pro Stunde — nur Idle (kein Fahrtsignal ≥14V)</div>
+        <div id="wochenVChart"></div>
+      </div>
+      <div class="card card-glow" style="margin-bottom:20px;">
+        <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">SoC-Profil nach Wochentag</div>
+        <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">Ø SoC pro Stunde — nur Idle (kein Fahrtsignal ≥14V)</div>
+        <div id="wochenSocChart"></div>
+      </div>
+      <div class="card card-glow">
+        <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">Datenbasis</div>
+        <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">Anzahl Idle-Stunden je Wochentag und Uhrzeit</div>
+        <div id="wochenCountChart"></div>
+      </div>
+    </div><!-- /wochenprofil -->
 
     <!-- Tab: Standtage -->
     <div id="itabContent-ruhetage" style="display:none;">
@@ -891,7 +911,7 @@ const App = {
     // Reset inner tab state
     this.innerTab = 'uebersicht';
     this.tabsRendered = {};
-    ['uebersicht','nacht','ruhetage','tiefen','ereignisse'].forEach(t => {
+    ['uebersicht','nacht','wochenprofil','ruhetage','tiefen','ereignisse'].forEach(t => {
       document.getElementById(`itabContent-${t}`).style.display = t==='uebersicht'?'block':'none';
       const btn = document.getElementById(`itab-${t}`);
       if (btn) { btn.classList.toggle('active', t==='uebersicht'); }
@@ -908,7 +928,7 @@ const App = {
   switchInnerTab(tabId, fromHistory = false) {
     const data = this.monthData[this.currentMonth];
     if (!data) return;
-    ['uebersicht','nacht','ruhetage','tiefen','ereignisse'].forEach(t => {
+    ['uebersicht','nacht','wochenprofil','ruhetage','tiefen','ereignisse'].forEach(t => {
       document.getElementById(`itabContent-${t}`).style.display = t===tabId?'block':'none';
       const btn = document.getElementById(`itab-${t}`);
       if (btn) btn.classList.toggle('active', t===tabId);
@@ -921,6 +941,7 @@ const App = {
     }
     if (!this.tabsRendered[tabId]) {
       if (tabId==='nacht') this.renderNacht(data);
+      else if (tabId==='wochenprofil') this.renderWochenprofil(data);
       else if (tabId==='ruhetage') this.renderRuhetage(data);
       else if (tabId==='tiefen') this.renderTiefenanalyse(data);
       else if (tabId==='ereignisse') this.renderEreignisse(data);
@@ -1431,6 +1452,84 @@ const App = {
     if (!rules.length)
       rules.push({ severity:'ok', label:'Keine Auffälligkeiten', desc:'Alle automatischen Prüfungen bestanden', hint:'' });
     return rules;
+  },
+
+  renderWochenprofil(data) {
+    const { hourly } = data;
+    const isDark = document.documentElement.classList.contains('dark');
+    const tc4=tv('--text-4'), tc5=tv('--text-5'), tc3=tv('--text-3'), tdiv=tv('--divider');
+    const themeMode = isDark?'dark':'light';
+
+    const DOW_DE = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+    const DOW_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#a855f7','#f97316','#ec4899'];
+
+    // Aggregate: weekdayData[dow][hour] = {vSum, socSum, count}
+    const wd = Array.from({length:7}, () => Array.from({length:24}, () => ({vSum:0,socSum:0,count:0})));
+    hourly.forEach(h => {
+      if (h.vMax >= 14.0) return; // exclude driving
+      const dow = (new Date(h.ts).getDay() + 6) % 7; // 0=Mo … 6=So
+      const hr = new Date(h.ts).getHours();
+      wd[dow][hr].vSum  += h.vAvg;
+      wd[dow][hr].socSum += h.soc;
+      wd[dow][hr].count++;
+    });
+
+    const hourLabels = Array.from({length:24}, (_,i) => `${String(i).padStart(2,'0')}:00`);
+
+    const vSeries   = DOW_DE.map((name,d) => ({ name, color: DOW_COLORS[d],
+      data: wd[d].map(b => b.count ? round(b.vSum/b.count, 3) : null) }));
+    const socSeries = DOW_DE.map((name,d) => ({ name, color: DOW_COLORS[d],
+      data: wd[d].map(b => b.count ? round(b.socSum/b.count, 1) : null) }));
+    const countSeries = DOW_DE.map((name,d) => ({ name, color: DOW_COLORS[d],
+      data: wd[d].map(b => b.count) }));
+
+    const baseOpts = (series, yMin, yMax, yFmt, tooltipFmt) => ({
+      chart:{type:'line',height:280,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
+      series,
+      stroke:{curve:'smooth',width:2},
+      markers:{size:0},
+      xaxis:{categories:hourLabels,labels:{rotate:-45,style:{colors:tc5,fontSize:'9px'},formatter:(_,i)=>i%2===0?hourLabels[i]:''}},
+      yaxis:{min:yMin,max:yMax,labels:{style:{colors:tc5,fontSize:'9px'},formatter:yFmt}},
+      tooltip:{theme:themeMode,x:{formatter:(_,{dataPointIndex:i})=>hourLabels[i]},y:{formatter:tooltipFmt}},
+      legend:{labels:{colors:tc3},markers:{size:8}},
+      grid:{borderColor:tdiv,strokeDashArray:3},
+      theme:{mode:themeMode},
+    });
+
+    // Chart 1: Voltage
+    const vEl = document.getElementById('wochenVChart');
+    vEl.innerHTML = '';
+    if (this.charts.wochenV) { try{this.charts.wochenV.destroy();}catch(e){} }
+    this.charts.wochenV = new ApexCharts(vEl, baseOpts(vSeries, 11.8, 13.4,
+      v => v ? v.toFixed(2)+'V' : '', v => v ? v.toFixed(3)+'V' : '–'));
+    this.charts.wochenV.render();
+
+    // Chart 2: SoC
+    const sEl = document.getElementById('wochenSocChart');
+    sEl.innerHTML = '';
+    if (this.charts.wochenSoc) { try{this.charts.wochenSoc.destroy();}catch(e){} }
+    this.charts.wochenSoc = new ApexCharts(sEl, baseOpts(socSeries, 0, 105,
+      v => v ? v.toFixed(0)+'%' : '', v => v ? v.toFixed(1)+'%' : '–'));
+    this.charts.wochenSoc.render();
+
+    // Chart 3: Count heatmap (bar)
+    const cEl = document.getElementById('wochenCountChart');
+    cEl.innerHTML = '';
+    if (this.charts.wochenCount) { try{this.charts.wochenCount.destroy();}catch(e){} }
+    this.charts.wochenCount = new ApexCharts(cEl, {
+      chart:{type:'bar',height:200,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4,stacked:true},
+      series: countSeries,
+      xaxis:{categories:hourLabels,labels:{rotate:-45,style:{colors:tc5,fontSize:'9px'},formatter:(_,i)=>i%2===0?hourLabels[i]:''}},
+      yaxis:{labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(0)}},
+      plotOptions:{bar:{columnWidth:'85%'}},
+      colors: DOW_COLORS,
+      dataLabels:{enabled:false},
+      tooltip:{theme:themeMode,x:{formatter:(_,{dataPointIndex:i})=>hourLabels[i]},y:{formatter:v=>v+' Messungen'}},
+      legend:{labels:{colors:tc3},markers:{size:8}},
+      grid:{borderColor:tdiv,strokeDashArray:3},
+      theme:{mode:themeMode},
+    });
+    this.charts.wochenCount.render();
   },
 
   renderNacht(data) {
