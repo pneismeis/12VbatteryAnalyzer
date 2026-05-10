@@ -1640,25 +1640,8 @@ const App = {
     const DOW_DE = ['Mo','Di','Mi','Do','Fr','Sa','So'];
     const DOW_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#a855f7','#f97316','#ec4899'];
 
-    // Always 10-min buckets max (144 pts/curve): aggregate readings on-the-fly if needed
-    let src;
-    if (data.subHourly) {
-      src = data.subHourly;
-    } else if (data.readings) {
-      const by10 = {};
-      data.readings.forEach(r => {
-        const dt = new Date(r.ts);
-        const slot = Math.floor((dt.getHours() * 60 + dt.getMinutes()) / 10) * 10;
-        const key = r.ts.slice(0,11) + String(Math.floor(slot/60)).padStart(2,'0') + ':' + String(slot%60).padStart(2,'0') + ':00';
-        if (!by10[key]) by10[key] = {vSum:0,socSum:0,count:0};
-        by10[key].vSum += r.v; by10[key].socSum += r.soc; by10[key].count++;
-      });
-      src = Object.keys(by10).sort().map(ts => { const b=by10[ts],vAvg=b.vSum/b.count; return {ts,vAvg,vMax:vAvg,soc:b.socSum/b.count}; });
-    } else {
-      src = data.hourly;
-    }
-    const isRaw = false;
-    const bucketMins = (data.subHourly || data.readings) ? 10 : 60;
+    const src = data.subHourly || data.hourly;
+    const bucketMins = data.subHourly ? 10 : 60;
     const nBuckets = 24 * 60 / bucketMins;
     const labels = Array.from({length:nBuckets}, (_,i) => {
       const h = Math.floor(i * bucketMins / 60), m = (i * bucketMins) % 60;
@@ -1670,11 +1653,11 @@ const App = {
     // Aggregate: wd[dow][bucket] = {vSum, socSum, count}
     const wd = Array.from({length:7}, () => Array.from({length:nBuckets}, () => ({vSum:0,socSum:0,count:0})));
     src.forEach(h => {
-      if (isRaw ? h.v >= 14.0 : h.vMax >= 14.0) return; // exclude driving
+      if (h.vMax >= 14.0) return; // exclude driving
       const dt = new Date(h.ts);
       const dow = (dt.getDay() + 6) % 7; // 0=Mo … 6=So
       const bucket = Math.floor((dt.getHours() * 60 + dt.getMinutes()) / bucketMins);
-      wd[dow][bucket].vSum  += isRaw ? h.v : h.vAvg;
+      wd[dow][bucket].vSum  += h.vAvg;
       wd[dow][bucket].socSum += h.soc;
       wd[dow][bucket].count++;
     });
@@ -1704,7 +1687,7 @@ const App = {
     const baseOpts = (series, yMin, yMax, yFmt, tooltipFmt) => ({
       chart:{type:'line',height:280,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
       series,
-      stroke:{curve:'smooth',width:2},
+      stroke:{curve:'straight',width:1.5},
       markers:{size:0},
       xaxis:{categories:labels,labels:{rotate:-45,style:{colors:tc5,fontSize:'9px'},formatter:(_,i)=>i%labelStep===0?labels[i]:''}},
       yaxis:{min:yMin,max:yMax,labels:{style:{colors:tc5,fontSize:'9px'},formatter:yFmt}},
