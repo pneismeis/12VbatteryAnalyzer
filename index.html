@@ -256,6 +256,7 @@
     <div class="inner-tab-nav">
       <button class="tab-btn active" id="itab-uebersicht" onclick="App.switchInnerTab('uebersicht')">Übersicht</button>
       <button class="tab-btn" id="itab-nacht" onclick="App.switchInnerTab('nacht')">Nachtanalyse</button>
+      <button class="tab-btn" id="itab-ruhetage" onclick="App.switchInnerTab('ruhetage')">Standtage</button>
       <button class="tab-btn" id="itab-tiefen" onclick="App.switchInnerTab('tiefen')">Tiefenanalyse</button>
       <button class="tab-btn" id="itab-ereignisse" onclick="App.switchInnerTab('ereignisse')">Ereignisse</button>
     </div>
@@ -362,6 +363,29 @@
         <div class="card card-glow" id="nightDriftCard"></div>
       </div>
     </div><!-- /nacht -->
+
+    <!-- Tab: Standtage -->
+    <div id="itabContent-ruhetage" style="display:none;">
+      <div id="ruheStats" class="kpi-grid" style="margin-bottom:20px;"></div>
+      <div class="card card-glow" style="margin-bottom:20px;">
+        <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">SoC & Spannung an Standtagen</div>
+        <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;">Nur Tage ohne Fahrt (kein Stundenwert ≥14V)</div>
+        <div id="ruheChart"></div>
+      </div>
+      <div class="card card-glow">
+        <div style="font-weight:600; color:var(--text-1); margin-bottom:4px;">Standtage im Detail</div>
+        <div style="font-size:0.75rem; color:var(--text-5); margin-bottom:14px;" id="ruheTableLabel"></div>
+        <div class="scroll-x">
+          <table>
+            <thead><tr>
+              <th>Tag</th><th>SoC Start → End</th><th>ΔSOC</th>
+              <th>Idle V ⌀</th><th>ΔV (Tag)</th><th>Temp ⌀</th><th>Nacht-Drift</th>
+            </tr></thead>
+            <tbody id="ruheTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div><!-- /ruhetage -->
 
     <!-- Tab: Tiefenanalyse -->
     <div id="itabContent-tiefen" style="display:none;">
@@ -513,7 +537,7 @@ function toggleTheme() {
     App.renderMainChart(data);
     App.renderDistChart(data);
     App.tabsRendered['uebersicht'] = true;
-    if (tab !== 'uebersicht') { App.switchInnerTab(tab); }
+    if (tab !== 'uebersicht') App.switchInnerTab(tab);
   }
 }
 
@@ -771,7 +795,7 @@ const App = {
     // Reset inner tab state
     this.innerTab = 'uebersicht';
     this.tabsRendered = {};
-    ['uebersicht','nacht','tiefen','ereignisse'].forEach(t => {
+    ['uebersicht','nacht','ruhetage','tiefen','ereignisse'].forEach(t => {
       document.getElementById(`itabContent-${t}`).style.display = t==='uebersicht'?'block':'none';
       const btn = document.getElementById(`itab-${t}`);
       if (btn) { btn.classList.toggle('active', t==='uebersicht'); }
@@ -788,7 +812,7 @@ const App = {
   switchInnerTab(tabId) {
     const data = this.monthData[this.currentMonth];
     if (!data) return;
-    ['uebersicht','nacht','tiefen','ereignisse'].forEach(t => {
+    ['uebersicht','nacht','ruhetage','tiefen','ereignisse'].forEach(t => {
       document.getElementById(`itabContent-${t}`).style.display = t===tabId?'block':'none';
       const btn = document.getElementById(`itab-${t}`);
       if (btn) btn.classList.toggle('active', t===tabId);
@@ -796,6 +820,7 @@ const App = {
     this.innerTab = tabId;
     if (!this.tabsRendered[tabId]) {
       if (tabId==='nacht') this.renderNacht(data);
+      else if (tabId==='ruhetage') this.renderRuhetage(data);
       else if (tabId==='tiefen') this.renderTiefenanalyse(data);
       else if (tabId==='ereignisse') this.renderEreignisse(data);
       this.tabsRendered[tabId] = true;
@@ -1483,6 +1508,119 @@ const App = {
         <div style="color:var(--text-5); font-size:0.88rem;">Zu wenig Nacht-Daten vorhanden.</div>`
       }
     `;
+  },
+
+  renderRuhetage(data) {
+    const { hourly, daily } = data;
+    const isDark = document.documentElement.classList.contains('dark');
+    const tc4=tv('--text-4'), tc5=tv('--text-5'), tc3=tv('--text-3'), tdiv=tv('--divider');
+
+    // Determine which days had ANY driving hour (vMax >= 14.0V)
+    const drivenDays = new Set();
+    hourly.forEach(h => { if (h.vMax >= 14.0) drivenDays.add(h.ts.slice(0,10)); });
+    const ruheDays = daily.filter(d => !drivenDays.has(d.date));
+
+    document.getElementById('ruheTableLabel').textContent =
+      `${ruheDays.length} von ${daily.length} Tagen — Auto stand still`;
+
+    if (!ruheDays.length) {
+      document.getElementById('ruheStats').innerHTML =
+        '<div style="color:var(--text-5);font-size:0.88rem;grid-column:1/-1;">Keine reinen Standtage in diesem Monat.</div>';
+      document.getElementById('ruheTableBody').innerHTML = '';
+      document.getElementById('ruheChart').innerHTML = '';
+      return;
+    }
+
+    // Per-day first/last idle V from hourly (for ΔV)
+    const idleHoursByDay = {};
+    hourly.forEach(h => {
+      if (h.vMax >= 14.0) return;
+      const d = h.ts.slice(0,10);
+      if (!idleHoursByDay[d]) idleHoursByDay[d] = [];
+      idleHoursByDay[d].push(h);
+    });
+
+    // Night drift lookup from computeDiagnose
+    const diag = this.computeDiagnose(data);
+    const nightByDate = {};
+    diag.nightRows.forEach(r => { nightByDate[r.date] = r; });
+
+    // Stats
+    const drains = ruheDays.map(d => d.socStart - d.socEnd).filter(x => x > 0);
+    const avgDrain = drains.length ? round(avg(drains), 1) : null;
+    const maxDrain = drains.length ? Math.max(...drains) : null;
+    const maxDrainDay = maxDrain !== null ? ruheDays.find(d => (d.socStart - d.socEnd) === maxDrain) : null;
+    const allIdleV = ruheDays.flatMap(d => (idleHoursByDay[d.date]||[]).map(h=>h.vAvg));
+    const avgIdleV = allIdleV.length ? round(avg(allIdleV), 3) : null;
+
+    document.getElementById('ruheStats').innerHTML = [
+      { label:'Standtage', val:`<span style="color:#818cf8;font-size:1.4rem;font-weight:700;">${ruheDays.length}</span>`, sub:`von ${daily.length} Tagen (${Math.round(ruheDays.length/daily.length*100)}%)` },
+      { label:'Ø SoC-Drain/Tag', val: avgDrain!==null?`<span style="color:${avgDrain>3?'#ef4444':avgDrain>1.5?'#f59e0b':'#10b981'};font-size:1.4rem;font-weight:700;">−${avgDrain}%</span>`:'–', sub:'nur Ruhetage mit Verlust' },
+      { label:'Höchster Tagesverlust', val: maxDrain!==null?`<span style="color:#f87171;font-size:1.4rem;font-weight:700;">−${maxDrain}%</span>`:'–', sub: maxDrainDay ? maxDrainDay.date.slice(5).split('-').reverse().join('.')+'.' : '' },
+      { label:'Ø Idle-Spannung', val: avgIdleV!==null?`<span style="color:${V_COLOR(avgIdleV)};font-size:1.4rem;font-weight:700;">${avgIdleV}V</span>`:'–', sub: avgIdleV!==null?V_LABEL(avgIdleV):'' },
+    ].map(k=>`<div class="card" style="padding:14px;">
+      <div style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-5);margin-bottom:8px;">${k.label}</div>
+      <div style="line-height:1;">${k.val}</div>
+      <div style="font-size:0.72rem;color:var(--text-6);margin-top:5px;">${k.sub}</div>
+    </div>`).join('');
+
+    // Chart: SoC + idle V over rest days
+    const ruheEl = document.getElementById('ruheChart');
+    ruheEl.innerHTML = '';
+    if (this.charts.ruhe) { try{this.charts.ruhe.destroy();}catch(e){} }
+    const cats = ruheDays.map(d => d.date.slice(5));
+    const socEnds = ruheDays.map(d => d.socEnd);
+    const socDeltas = ruheDays.map(d => round(d.socEnd - d.socStart, 1));
+    const vAvgs = ruheDays.map(d => d.vIdleAvg);
+    this.charts.ruhe = new ApexCharts(ruheEl, {
+      chart:{type:'line',height:260,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4},
+      series:[
+        {name:'SoC End (%)',data:socEnds,color:'#10b981'},
+        {name:'ΔSOC (%)',data:socDeltas,color:'#f87171',type:'bar'},
+        {name:'Idle V ⌀',data:vAvgs,color:'#a855f7'},
+      ],
+      xaxis:{categories:cats,labels:{rotate:-45,style:{colors:tc5,fontSize:'9px'}}},
+      yaxis:[
+        {seriesName:'SoC End (%)',title:{text:'SoC %',style:{color:'#10b981',fontSize:'10px'}},min:0,max:105,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(0)+'%'}},
+        {seriesName:'ΔSOC (%)',show:false,min:-20,max:20},
+        {seriesName:'Idle V ⌀',opposite:true,title:{text:'V',style:{color:'#a855f7',fontSize:'10px'}},min:11.5,max:13.5,decimalsInFloat:2,labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(2)}},
+      ],
+      stroke:{curve:'smooth',width:[2,0,1.5]},
+      plotOptions:{bar:{borderRadius:3,columnWidth:'60%'}},
+      tooltip:{theme:isDark?'dark':'light',x:{formatter:(_,{dataPointIndex:i})=>ruheDays[i]?.date||''},y:[{formatter:v=>v+'%'},{formatter:v=>(v>=0?'+':'')+v+'%'},{formatter:v=>v.toFixed(3)+'V'}]},
+      legend:{labels:{colors:tc3},markers:{size:5}},
+      grid:{borderColor:tdiv,strokeDashArray:3},
+      theme:{mode:isDark?'dark':'light'},
+    });
+    this.charts.ruhe.render();
+
+    // Table
+    const tbody = document.getElementById('ruheTableBody');
+    tbody.innerHTML = '';
+    [...ruheDays].reverse().forEach(d => {
+      const socDelta = d.socEnd - d.socStart;
+      const deltaColor = socDelta >= 0 ? '#10b981' : '#f87171';
+      const hrs = idleHoursByDay[d.date] || [];
+      const vFirst = hrs.length ? hrs[0].vAvg : null;
+      const vLast  = hrs.length ? hrs[hrs.length-1].vAvg : null;
+      const dV = (vFirst !== null && vLast !== null) ? round(vLast - vFirst, 3) : null;
+      const night = nightByDate[d.date];
+      const [,mm,dd] = d.date.split('-');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-weight:500;color:var(--text-2);">${dd}.${mm}.</td>
+        <td>
+          <span style="color:var(--text-4);">${d.socStart}%</span>
+          <span style="color:var(--text-6);margin:0 4px;">→</span>
+          <span style="color:${d.socEnd>70?'#10b981':d.socEnd>50?'#f59e0b':'#ef4444'};font-weight:600;">${d.socEnd}%</span>
+        </td>
+        <td style="color:${deltaColor};font-weight:600;">${socDelta>=0?'+':''}${socDelta}%</td>
+        <td style="font-family:monospace;color:${V_COLOR(d.vIdleAvg)};">${d.vIdleAvg.toFixed(3)}V</td>
+        <td style="font-family:monospace;color:${dV===null?'var(--text-6)':dV<-0.1?'#ef4444':dV<-0.03?'#f59e0b':'#10b981'};">${dV!==null?(dV>=0?'+':'')+dV.toFixed(3)+'V':'–'}</td>
+        <td style="color:#f97316;">${d.tempAvg.toFixed(1)}°C</td>
+        <td style="font-family:monospace;color:${night&&night.dV<-0.1?'#ef4444':night&&night.dV<-0.03?'#f59e0b':'#10b981'};">${night?`${night.dV>=0?'+':''}${night.dV.toFixed(3)}V`:'–'}</td>`;
+      tbody.appendChild(tr);
+    });
   },
 
   renderTiefenanalyse(data) {
