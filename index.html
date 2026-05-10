@@ -1633,7 +1633,6 @@ const App = {
   },
 
   renderWochenprofil(data) {
-    const { hourly } = data;
     const isDark = document.documentElement.classList.contains('dark');
     const tc4=tv('--text-4'), tc5=tv('--text-5'), tc3=tv('--text-3'), tdiv=tv('--divider');
     const themeMode = isDark?'dark':'light';
@@ -1641,22 +1640,32 @@ const App = {
     const DOW_DE = ['Mo','Di','Mi','Do','Fr','Sa','So'];
     const DOW_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#a855f7','#f97316','#ec4899'];
 
-    // Aggregate: weekdayData[dow][hour] = {vSum, socSum, count}
-    const wd = Array.from({length:7}, () => Array.from({length:24}, () => ({vSum:0,socSum:0,count:0})));
-    hourly.forEach(h => {
+    // Use finest available resolution: subHourly (10-min) → hourly (60-min)
+    const src = data.subHourly || data.hourly;
+    const bucketMins = data.subHourly ? 10 : 60;
+    const nBuckets = 24 * 60 / bucketMins;
+    const labels = Array.from({length:nBuckets}, (_,i) => {
+      const h = Math.floor(i * bucketMins / 60), m = (i * bucketMins) % 60;
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    });
+    // Show an x-axis tick every full hour regardless of resolution
+    const labelStep = 60 / bucketMins;
+
+    // Aggregate: wd[dow][bucket] = {vSum, socSum, count}
+    const wd = Array.from({length:7}, () => Array.from({length:nBuckets}, () => ({vSum:0,socSum:0,count:0})));
+    src.forEach(h => {
       if (h.vMax >= 14.0) return; // exclude driving
-      const dow = (new Date(h.ts).getDay() + 6) % 7; // 0=Mo … 6=So
-      const hr = new Date(h.ts).getHours();
-      wd[dow][hr].vSum  += h.vAvg;
-      wd[dow][hr].socSum += h.soc;
-      wd[dow][hr].count++;
+      const dt = new Date(h.ts);
+      const dow = (dt.getDay() + 6) % 7; // 0=Mo … 6=So
+      const bucket = Math.floor((dt.getHours() * 60 + dt.getMinutes()) / bucketMins);
+      wd[dow][bucket].vSum  += h.vAvg;
+      wd[dow][bucket].socSum += h.soc;
+      wd[dow][bucket].count++;
     });
 
-    const hourLabels = Array.from({length:24}, (_,i) => `${String(i).padStart(2,'0')}:00`);
-
-    // Linear interpolation across null gaps (hours always driven = no idle data)
+    // Linear interpolation across null gaps
     function fillNulls(arr) {
-      const out = arr.map(v => v); // copy
+      const out = arr.map(v => v);
       for (let i = 0; i < out.length; i++) {
         if (out[i] !== null) continue;
         let lo = i - 1, hi = i + 1;
@@ -1681,9 +1690,9 @@ const App = {
       series,
       stroke:{curve:'smooth',width:2},
       markers:{size:0},
-      xaxis:{categories:hourLabels,labels:{rotate:-45,style:{colors:tc5,fontSize:'9px'},formatter:(_,i)=>i%2===0?hourLabels[i]:''}},
+      xaxis:{categories:labels,labels:{rotate:-45,style:{colors:tc5,fontSize:'9px'},formatter:(_,i)=>i%labelStep===0?labels[i]:''}},
       yaxis:{min:yMin,max:yMax,labels:{style:{colors:tc5,fontSize:'9px'},formatter:yFmt}},
-      tooltip:{theme:themeMode,x:{formatter:(_,{dataPointIndex:i})=>hourLabels[i]},y:{formatter:tooltipFmt}},
+      tooltip:{theme:themeMode,x:{formatter:(_,{dataPointIndex:i})=>labels[i]},y:{formatter:tooltipFmt}},
       legend:{labels:{colors:tc3},markers:{size:8}},
       grid:{borderColor:tdiv,strokeDashArray:3},
       theme:{mode:themeMode},
@@ -1712,12 +1721,12 @@ const App = {
     this.charts.wochenCount = new ApexCharts(cEl, {
       chart:{type:'bar',height:200,background:'transparent',toolbar:{show:false},animations:{enabled:false},foreColor:tc4,stacked:true},
       series: countSeries,
-      xaxis:{categories:hourLabels,labels:{rotate:-45,style:{colors:tc5,fontSize:'9px'},formatter:(_,i)=>i%2===0?hourLabels[i]:''}},
+      xaxis:{categories:labels,labels:{rotate:-45,style:{colors:tc5,fontSize:'9px'},formatter:(_,i)=>i%labelStep===0?labels[i]:''}},
       yaxis:{labels:{style:{colors:tc5,fontSize:'9px'},formatter:v=>v.toFixed(0)}},
       plotOptions:{bar:{columnWidth:'85%'}},
       colors: DOW_COLORS,
       dataLabels:{enabled:false},
-      tooltip:{theme:themeMode,x:{formatter:(_,{dataPointIndex:i})=>hourLabels[i]},y:{formatter:v=>v+' Messungen'}},
+      tooltip:{theme:themeMode,x:{formatter:(_,{dataPointIndex:i})=>labels[i]},y:{formatter:v=>v+' Messungen'}},
       legend:{labels:{colors:tc3},markers:{size:8}},
       grid:{borderColor:tdiv,strokeDashArray:3},
       theme:{mode:themeMode},
