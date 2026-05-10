@@ -2525,6 +2525,10 @@ const App = {
     const idleRaw     = data.readings  ? filterIdle(data.readings)  : null;
 
     const getV = h => h.vAvg !== undefined ? h.vAvg : h.v;
+    const vVals = idleHourly.map(getV).filter(v => v != null);
+    const vAxisMin = Math.floor((Math.min(...vVals) - 0.2) * 10) / 10;
+    const vAxisMax = Math.ceil((Math.max(...vVals) + 0.2) * 10) / 10;
+
     const buildSeries = src => [
       { name: 'Spannung (V)', data: src.map(h => [+new Date(h.ts), getV(h)]),  color: '#a855f7' },
       { name: 'SoC (%)',      data: src.map(h => [+new Date(h.ts), h.soc]),    color: '#10b981' },
@@ -2590,7 +2594,7 @@ const App = {
       stroke: { curve: 'smooth', width: [1.5, 2, 1.5] },
       xaxis: { type: 'datetime', labels: { style: { colors: tc5, fontSize:'11px' }, datetimeUTC: false } },
       yaxis: [
-        { seriesName: 'Spannung (V)', title: { text: 'V', style:{color:'#a855f7',fontSize:'11px'} }, min: 11.5, max: 12.5, decimalsInFloat: 2, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(2)+'V' } },
+        { seriesName: 'Spannung (V)', title: { text: 'V', style:{color:'#a855f7',fontSize:'11px'} }, min: vAxisMin, max: vAxisMax, decimalsInFloat: 2, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(2)+'V' } },
         { seriesName: 'SoC (%)', opposite: true, title: { text: 'SoC', style:{color:'#10b981',fontSize:'11px'} }, min: 0, max: 105, labels: { style:{colors:tc5,fontSize:'10px'}, formatter: v => v.toFixed(0)+'%' } },
         { seriesName: 'Temp (°C)', show: false, min: -10, max: 60 },
       ],
