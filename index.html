@@ -7,6 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.54.0/dist/apexcharts.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
   <style>
     :root {
       --bg: #f0f4f8;
@@ -214,6 +215,12 @@
       <button id="overviewTab" class="tab-btn" onclick="App.showOverview()">
         <span style="margin-right:4px;">📊</span> Übersicht
       </button>
+      <button id="shareBtn" class="theme-btn" onclick="App.shareMonth()" title="Monat teilen" style="display:none;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+        </svg>
+      </button>
       <button class="theme-btn" onclick="App.showHelp()" title="Hilfe & Referenz">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"/>
@@ -252,6 +259,12 @@
 
   <!-- Month View -->
   <div id="monthView" style="display:none;">
+
+    <!-- Shared Banner -->
+    <div id="sharedBanner" style="display:none; background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.25); border-radius:12px; padding:12px 16px; margin-bottom:16px; align-items:center; gap:10px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      <span id="sharedBannerText" style="font-size:0.85rem; color:#93c5fd; font-weight:500;"></span>
+    </div>
 
     <!-- Stat Cards -->
     <div id="statsGrid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:20px;"></div>
@@ -550,6 +563,34 @@
   </div>
 </div>
 
+<!-- Share Modal -->
+<div id="shareModal" style="display:none; position:fixed; inset:0; z-index:200; background:rgba(0,0,0,0.7); backdrop-filter:blur(6px); align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--surface); border:1px solid rgba(59,130,246,0.25); border-radius:20px; padding:32px; max-width:520px; width:100%; box-shadow:var(--modal-shadow);">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <div>
+        <div style="font-size:1.1rem; font-weight:700; color:var(--text-1);">Monat teilen</div>
+        <div style="font-size:0.78rem; color:var(--text-5); margin-top:3px;">Link enthält alle Daten — kein Server nötig</div>
+      </div>
+      <button class="modal-close" onclick="App.closeShare()">×</button>
+    </div>
+    <div style="font-size:0.82rem; color:var(--text-4); margin-bottom:14px; line-height:1.6;">
+      Dieser Link ist komprimiert und selbst-enthaltend.<br>
+      Für Foren-Posts empfiehlt sich ein URL-Kürzer wie <strong style="color:var(--text-3);">bit.ly</strong> oder <strong style="color:var(--text-3);">TinyURL</strong>.
+    </div>
+    <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <input id="shareUrlInput" type="text" readonly
+        style="flex:1; padding:8px 12px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); color:var(--text-3); font-size:0.72rem; font-family:monospace; outline:none; min-width:0;"
+        onclick="this.select()">
+      <button id="shareCopyBtn" onclick="App.copyShareUrl()"
+        style="padding:8px 14px; border-radius:8px; background:rgba(59,130,246,0.15); border:1px solid rgba(59,130,246,0.3); color:#93c5fd; font-size:0.82rem; font-weight:500; cursor:pointer; white-space:nowrap; flex-shrink:0;"
+        onmouseover="this.style.background='rgba(59,130,246,0.25)'" onmouseout="this.style.background='rgba(59,130,246,0.15)'">
+        Kopieren
+      </button>
+    </div>
+    <div id="shareInfo" style="font-size:0.75rem; color:var(--text-5);"></div>
+  </div>
+</div>
+
 <!-- Help Modal -->
 <div id="helpModal" style="display:none; position:fixed; inset:0; z-index:200; background:rgba(0,0,0,0.7); backdrop-filter:blur(6px); align-items:center; justify-content:center; padding:20px;">
   <div style="background:var(--surface); border:1px solid rgba(59,130,246,0.25); border-radius:20px; padding:32px; max-width:520px; width:100%; max-height:90vh; overflow-y:auto; box-shadow:var(--modal-shadow);">
@@ -828,6 +869,8 @@ const App = {
     }
 
     const params = new URLSearchParams(location.search);
+    const shareParam = params.get('share');
+    if (shareParam) { await this.loadShare(shareParam); return; }
     if (params.get('view') === 'overview') {
       await this.showOverview(true);
     } else {
@@ -934,6 +977,19 @@ const App = {
       const btn = document.getElementById(`itab-${t}`);
       if (btn) { btn.classList.toggle('active', t==='uebersicht'); }
     });
+    // Share button: show only for non-shared views
+    const shareBtn = document.getElementById('shareBtn');
+    if (shareBtn) shareBtn.style.display = data._shared ? 'none' : '';
+    // Shared banner
+    const banner = document.getElementById('sharedBanner');
+    if (banner) {
+      if (data._shared) {
+        document.getElementById('sharedBannerText').textContent = `Geteilte Ansicht · ${data.label} · Schreibgeschützt`;
+        banner.style.display = 'flex';
+      } else {
+        banner.style.display = 'none';
+      }
+    }
     this.renderStats(data);
     this.renderPrediction(data);
     this.renderMainChart(data);
@@ -1064,13 +1120,36 @@ const App = {
     container.innerHTML = '';
     if (this.charts.main) { try { this.charts.main.destroy(); } catch(e){} }
 
-    const hourly = data.hourly;
-    document.getElementById('chartSubtitle').textContent =
-      `${hourly.length} Stunden · ${data.summary.firstReading.slice(0,10)} bis ${data.summary.lastReading.slice(0,10)}`;
+    const hourly   = data.hourly;
+    const subHrly  = data.subHourly || null;
+    const raw      = data.readings  || null;
+    const DAY      = 86400000;
+    const self     = this;
 
-    const socSeries = hourly.map(h => [new Date(h.ts).getTime(), h.soc]);
-    const vSeries = hourly.map(h => [new Date(h.ts).getTime(), h.vAvg]);
-    const tempSeries = hourly.map(h => [new Date(h.ts).getTime(), h.temp]);
+    const getV = h => h.vAvg !== undefined ? h.vAvg : h.v;
+    const buildSeries = src => [
+      { name: 'SoC (%)',         data: src.map(h => [+new Date(h.ts), h.soc]),   color: '#10b981' },
+      { name: 'Spannung (V)',    data: src.map(h => [+new Date(h.ts), getV(h)]), color: '#a855f7' },
+      { name: 'Temperatur (°C)', data: src.map(h => [+new Date(h.ts), h.temp]),  color: '#f97316' },
+    ];
+
+    const resolveSource = (minMs, maxMs) => {
+      const range = maxMs - minMs;
+      if (range <= 2 * DAY && raw) {
+        const buf = range * 0.3;
+        const src = raw.filter(h => { const t = +new Date(h.ts); return t >= minMs - buf && t <= maxMs + buf; });
+        return { src, label: `1-Min-Auflösung · ${src.length} Punkte` };
+      }
+      if (range <= 7 * DAY && subHrly) {
+        const buf = range * 0.1;
+        const src = subHrly.filter(h => { const t = +new Date(h.ts); return t >= minMs - buf && t <= maxMs + buf; });
+        return { src, label: `10-Min-Auflösung · ${src.length} Punkte` };
+      }
+      return { src: hourly, label: `Stunden-Auflösung · ${hourly.length} Punkte` };
+    };
+
+    const defaultSubtitle = `${hourly.length} Stunden · ${data.summary.firstReading.slice(0,10)} bis ${data.summary.lastReading.slice(0,10)}`;
+    document.getElementById('chartSubtitle').textContent = defaultSubtitle;
 
     const showFahrten = document.getElementById('showCharging')?.checked !== false;
     const chargingAnnotations = [];
@@ -1100,12 +1179,25 @@ const App = {
         toolbar: { show: true, tools: { download: false, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true } },
         zoom: { enabled: true }, animations: { enabled: false },
         foreColor: tc4,
+        events: {
+          zoomed(ctx, {xaxis}) {
+            if (self._mainZoomLock) return;
+            self._mainZoomLock = true;
+            const {src, label} = resolveSource(xaxis.min, xaxis.max);
+            ctx.updateSeries(buildSeries(src), false);
+            document.getElementById('chartSubtitle').textContent = label;
+            self._mainZoomLock = false;
+          },
+          beforeResetZoom(ctx) {
+            if (self._mainZoomLock) return;
+            self._mainZoomLock = true;
+            ctx.updateSeries(buildSeries(hourly), false);
+            document.getElementById('chartSubtitle').textContent = defaultSubtitle;
+            self._mainZoomLock = false;
+          },
+        },
       },
-      series: [
-        { name: 'SoC (%)', data: socSeries, color: '#10b981' },
-        { name: 'Spannung (V)', data: vSeries, color: '#a855f7' },
-        { name: 'Temperatur (°C)', data: tempSeries, color: '#f97316' },
-      ],
+      series: buildSeries(hourly),
       stroke: { curve: 'smooth', width: [2, 1.5, 1.5] },
       xaxis: { type: 'datetime', labels: { style: { colors: tc5, fontSize:'11px' }, datetimeUTC: false } },
       yaxis: [
@@ -2296,6 +2388,77 @@ const App = {
   showHelp() { document.getElementById('helpModal').style.display = 'flex'; },
   closeHelp() { document.getElementById('helpModal').style.display = 'none'; },
 
+  shareMonth() {
+    const data = this.monthData[this.currentMonth];
+    if (!data || data._shared) return;
+    const payload = {
+      month: data.month,
+      label: data.label,
+      summary: data.summary,
+      daily: data.daily,
+      hourly: data.hourly.map(h => [h.ts, h.vAvg, h.vMin, h.vMax, h.soc, h.temp, h.charging ? 1 : 0]),
+      _shared: true,
+    };
+    let compressed;
+    try {
+      compressed = LZString.compressToEncodedURIComponent(JSON.stringify(payload));
+    } catch(e) {
+      this.showToast('Komprimierung fehlgeschlagen', true);
+      return;
+    }
+    const url = location.origin + location.pathname + '?share=' + compressed;
+    document.getElementById('shareUrlInput').value = url;
+    const kb = (compressed.length / 1024).toFixed(1);
+    document.getElementById('shareInfo').textContent = `URL-Größe: ${kb} KB · ${data.label} · ${data.hourly.length} Stunden-Einträge`;
+    document.getElementById('shareModal').style.display = 'flex';
+  },
+
+  closeShare() { document.getElementById('shareModal').style.display = 'none'; },
+
+  async copyShareUrl() {
+    const url = document.getElementById('shareUrlInput').value;
+    try {
+      await navigator.clipboard.writeText(url);
+      const btn = document.getElementById('shareCopyBtn');
+      const orig = btn.textContent;
+      btn.textContent = '✓ Kopiert!';
+      setTimeout(() => { btn.textContent = orig; }, 2000);
+    } catch(e) {
+      document.getElementById('shareUrlInput').select();
+      this.showToast('Strg+C zum Kopieren', false);
+    }
+  },
+
+  async loadShare(encoded) {
+    document.getElementById('loadingState').style.display = 'flex';
+    document.getElementById('monthView').style.display = 'none';
+    try {
+      const json = LZString.decompressFromEncodedURIComponent(encoded);
+      if (!json) throw new Error('Ungültiger oder beschädigter Link');
+      const raw = JSON.parse(json);
+      // Reconstruct hourly objects from compact arrays
+      raw.hourly = raw.hourly.map(h => ({
+        ts: h[0], vAvg: h[1], vMin: h[2], vMax: h[3], soc: h[4], temp: h[5], charging: !!h[6]
+      }));
+      raw._shared = true;
+      this.monthData[raw.month] = raw;
+      this.manifest = { months: [{ month: raw.month, label: raw.label }] };
+      this.currentMonth = raw.month;
+      this.renderTabs();
+      document.getElementById('loadingState').style.display = 'none';
+      document.getElementById('monthView').style.display = 'block';
+      this.render(raw);
+    } catch(e) {
+      document.getElementById('loadingState').style.display = 'flex';
+      document.getElementById('loadingState').innerHTML = `
+        <div style="text-align:center;">
+          <div style="font-size:2.5rem; margin-bottom:16px;">⚠️</div>
+          <div style="font-size:1rem; font-weight:600; color:var(--text-1); margin-bottom:8px;">Link ungültig</div>
+          <div style="font-size:0.82rem; color:var(--text-5);">${e.message}</div>
+        </div>`;
+    }
+  },
+
   downloadSampleXLS() {
     const MON = ['','Jan.','Feb.','Mär.','Apr.','Mai','Jun.','Jul.','Aug.','Sep.','Okt.','Nov.','Dez.'];
     const pad = n => String(n).padStart(2,'0');
@@ -2510,6 +2673,9 @@ document.getElementById('dayModal').addEventListener('click', function(e) {
 });
 document.getElementById('helpModal').addEventListener('click', function(e) {
   if (e.target === this) App.closeHelp();
+});
+document.getElementById('shareModal').addEventListener('click', function(e) {
+  if (e.target === this) App.closeShare();
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────
