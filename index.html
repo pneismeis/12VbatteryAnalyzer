@@ -1202,7 +1202,10 @@ const App = {
 
     for (let i=1; i<idle.length; i++) {
       const drop = idle[i-1].vAvg - idle[i].vAvg;
-      if (drop > 0.2) events.push({ type:'SUDDEN_DROP', severity:'warning', ts:idle[i].ts, from:idle[i-1].vAvg, to:idle[i].vAvg, drop:round(drop,3) });
+      const gapH = (new Date(idle[i].ts) - new Date(idle[i-1].ts)) / 3600000;
+      // skip post-charge settling (from > 13.0V) and non-consecutive readings
+      if (drop > 0.2 && idle[i-1].vAvg <= 13.0 && gapH <= 2)
+        events.push({ type:'SUDDEN_DROP', severity:'warning', ts:idle[i].ts, from:idle[i-1].vAvg, to:idle[i].vAvg, drop:round(drop,3) });
     }
     idle.forEach(h => { if (h.vAvg < 11.8) events.push({ type:'CRITICAL_READING', severity:'critical', ts:h.ts, v:h.vAvg }); });
     events.sort((a,b)=>(a.ts||'').localeCompare(b.ts||''));
@@ -1441,9 +1444,9 @@ const App = {
     const tc4=tv('--text-4'), tc5=tv('--text-5'), tc3=tv('--text-3'), tdiv=tv('--divider');
     const themeMode = isDark?'dark':'light';
 
-    // ── Heatmap: day × hour
+    // ── Heatmap: day × hour (all readings, not just idle)
     const dayHourMap = {};
-    idle.forEach(h => {
+    hourly.forEach(h => {
       const day = h.ts.slice(0,10), hr = new Date(h.ts).getHours();
       if (!dayHourMap[day]) dayHourMap[day] = {};
       if (!dayHourMap[day][hr]) dayHourMap[day][hr] = [];
