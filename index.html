@@ -2506,19 +2506,18 @@ const App = {
     if (!url.includes('#share=')) return;
     btn.textContent = '…'; btn.disabled = true;
     try {
-      // Upload compressed blob to dpaste.org, get a short paste ID
       const compressed = url.split('#share=')[1];
-      const r = await fetch('https://dpaste.org/api/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'content=' + encodeURIComponent(compressed) + '&syntax=text&expiry_days=365',
-      });
-      const pasteUrl = (await r.text()).trim().replace(/"/g, '');
-      const pasteId = pasteUrl.split('/').filter(Boolean).pop();
-      if (!pasteId || pasteId.length < 3) throw new Error('Ungültige Antwort');
-      const shortUrl = location.origin + location.pathname + '#paste=' + pasteId;
+      const form = new FormData();
+      form.append('file', new Blob([compressed], { type: 'text/plain' }), 'data.txt');
+      const r = await fetch('https://0x0.st', { method: 'POST', body: form });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const pasteUrl = (await r.text()).trim();
+      // pasteUrl is like "https://0x0.st/AbCd.txt" — store the path after the host
+      const pasteId = pasteUrl.replace(/^https?:\/\/0x0\.st\//, '');
+      if (!pasteId) throw new Error('Ungültige Antwort');
+      const shortUrl = location.origin + location.pathname + '#paste=' + encodeURIComponent(pasteId);
       input.value = shortUrl;
-      document.getElementById('shareInfo').textContent += ' · ~' + shortUrl.length + ' Zeichen';
+      document.getElementById('shareInfo').textContent += ' · ' + shortUrl.length + ' Zeichen';
       btn.textContent = '✓'; btn.disabled = true;
     } catch(e) {
       this.showToast('Kürzung fehlgeschlagen: ' + e.message, true);
@@ -2530,8 +2529,8 @@ const App = {
     document.getElementById('loadingState').style.display = 'flex';
     document.getElementById('monthView').style.display = 'none';
     try {
-      const r = await fetch(`https://dpaste.org/${pasteId}.txt`);
-      if (!r.ok) throw new Error(`Paste nicht gefunden (${r.status})`);
+      const r = await fetch('https://0x0.st/' + decodeURIComponent(pasteId));
+      if (!r.ok) throw new Error(`Datei nicht gefunden (${r.status})`);
       const compressed = (await r.text()).trim();
       await this.loadShare(compressed);
     } catch(e) {
