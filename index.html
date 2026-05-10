@@ -1447,6 +1447,9 @@ const App = {
           : '<span style="color:#ef4444;">✗ Kritisch</span>';
         const [y,m,dd] = r.date.split('-');
         const tr = document.createElement('tr');
+        tr.style.cursor = 'pointer';
+        tr.title = 'Klicken für Stundendetails';
+        tr.onclick = () => App.showDayDetail(r.date);
         tr.innerHTML = `
           <td style="font-weight:500;color:var(--text-2);">${dd}.${m}.</td>
           <td style="font-family:monospace;color:${V_COLOR(r.vStart)};">${r.vStart.toFixed(3)}</td>
