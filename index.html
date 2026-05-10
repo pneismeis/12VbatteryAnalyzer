@@ -877,7 +877,8 @@ const App = {
     }
 
     const params = new URLSearchParams(location.search);
-    const shareParam = params.get('share');
+    const hashShare = location.hash.startsWith('#share=') ? location.hash.slice(7) : null;
+    const shareParam = hashShare || params.get('share'); // params.get fallback for old links
     if (shareParam) { await this.loadShare(shareParam); return; }
     if (params.get('view') === 'overview') {
       await this.showOverview(true);
@@ -893,9 +894,9 @@ const App = {
       const p = new URLSearchParams(location.search);
       if (p.get('view') === 'overview') {
         this.showOverview(true);
-      } else if (p.get('share')) {
-        const tab = p.get('tab');
-        this.loadShare(p.get('share')).catch(() => {});
+      } else if (location.hash.startsWith('#share=') || p.get('share')) {
+        const encoded = location.hash.startsWith('#share=') ? location.hash.slice(7) : p.get('share');
+        this.loadShare(encoded).catch(() => {});
         // tab applied inside loadShare after render
       } else {
         const m = p.get('m') || this.manifest.months[this.manifest.months.length - 1].month;
@@ -960,11 +961,14 @@ const App = {
     this.renderTabs();
     document.getElementById('overviewTab').classList.remove('active');
     if (!fromHistory) {
-      const p = new URLSearchParams(location.search);
-      p.set('m', monthKey); p.delete('view');
-      // keep current inner tab in URL if not resetting
-      if (!p.get('tab')) p.delete('tab');
-      history.pushState({}, '', '?' + p.toString());
+      const isLocalMonth = this.manifest.months.find(m => m.month === monthKey && m.local);
+      if (!isLocalMonth) {
+        const p = new URLSearchParams(location.search);
+        p.set('m', monthKey); p.delete('view');
+        if (!p.get('tab')) p.delete('tab');
+        history.pushState({}, '', '?' + p.toString());
+      }
+      // For local months render() will replaceState with #share=... fragment
     }
 
     document.getElementById('loadingState').style.display = 'flex';
@@ -1008,12 +1012,12 @@ const App = {
     if (shareBtn) shareBtn.style.display = data._shared ? 'none' : '';
     const clearBtn = document.getElementById('clearLocalBtn');
     if (clearBtn) clearBtn.style.display = isLocal ? '' : 'none';
-    // Auto-update browser URL to share URL for local months so it's always copy-pasteable
+    // Auto-update browser URL to share fragment for local months
     if (isLocal && !data._shared) {
       try {
         const shareUrl = this.buildShareUrl(data);
-        const compressed = shareUrl.split('?share=')[1];
-        history.replaceState({}, '', '?share=' + compressed);
+        const fragment = '#' + shareUrl.split('#')[1];
+        history.replaceState({}, '', fragment);
       } catch(e) {}
     }
     // Shared banner
@@ -1047,7 +1051,7 @@ const App = {
     if (!fromHistory) {
       const p = new URLSearchParams(location.search);
       p.set('tab', tabId);
-      history.pushState({}, '', '?' + p.toString());
+      history.pushState({}, '', '?' + p.toString() + location.hash);
     }
     if (!this.tabsRendered[tabId]) {
       if (tabId==='nacht') this.renderNacht(data);
@@ -2437,7 +2441,8 @@ const App = {
       _shared: true,
     };
     const c = LZString.compressToEncodedURIComponent(JSON.stringify(payload));
-    return location.origin + location.pathname + '?share=' + c;
+    // Use fragment (#) — never sent to server, avoids 414 URI Too Long on GitHub Pages
+    return location.origin + location.pathname + '#share=' + c;
   },
 
   shareMonth() {
