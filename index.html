@@ -1704,6 +1704,9 @@ const App = {
       const night = nightByDate[d.date];
       const [,mm,dd] = d.date.split('-');
       const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.title = 'Klicken für Stundendetails';
+      tr.onclick = () => App.showDayDetail(d.date);
       tr.innerHTML = `
         <td style="font-weight:500;color:var(--text-2);">${dd}.${mm}.</td>
         <td>
