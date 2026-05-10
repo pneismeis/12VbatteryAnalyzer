@@ -556,6 +556,14 @@
       ≥ 13.5 V = Ladevorgang (Zündung an / Motor läuft)<br>
       ≥ 14.0 V = Fahrt mit aktivem Hochvolt-Ladeimpuls
     </div>
+    <div style="font-size:0.88rem; font-weight:600; color:var(--text-2); margin-bottom:10px;">Beispiel-XLS</div>
+    <div style="font-size:0.78rem; color:var(--text-4); margin-bottom:10px; line-height:1.6;">
+      Beispieldatei im Battery-Check-Format (3 Tage, inkl. Fahrt und Ruhephasen) — direkt importierbar über <em>Bericht hinzufügen</em>.
+    </div>
+    <button onclick="App.downloadSampleXLS()" style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:10px;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);color:#34d399;font-size:0.82rem;font-weight:500;cursor:pointer;margin-bottom:24px;" onmouseover="this.style.background='rgba(16,185,129,0.2)'" onmouseout="this.style.background='rgba(16,185,129,0.1)'">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a.5.5 0 0 1 .5.5v11.793l3.146-3.147a.5.5 0 0 1 .708.708l-4 4a.5.5 0 0 1-.708 0l-4-4a.5.5 0 0 1 .708-.708L7.5 13.293V1.5A.5.5 0 0 1 8 1"/></svg>
+      battery_check_example.xls herunterladen
+    </button>
     <div style="font-size:0.88rem; font-weight:600; color:var(--text-2); margin-bottom:10px;">Battery Check App herunterladen</div>
     <div style="display:flex; gap:10px; flex-wrap:wrap;">
       <a href="https://play.google.com/store/apps/details?id=com.dc.bm6_intact&hl=de" target="_blank" rel="noopener noreferrer"
@@ -2069,6 +2077,44 @@ const App = {
 
   showHelp() { document.getElementById('helpModal').style.display = 'flex'; },
   closeHelp() { document.getElementById('helpModal').style.display = 'none'; },
+
+  downloadSampleXLS() {
+    const MON = ['','Jan.','Feb.','Mär.','Apr.','Mai','Jun.','Jul.','Aug.','Sep.','Okt.','Nov.','Dez.'];
+    const pad = n => String(n).padStart(2,'0');
+    const rows = [['Date/Time','Voltage(V)','SOC(%)','Temperature(°C)']];
+
+    // 3 days of sample data, readings every 5 minutes
+    // Day 1: quiet rest day
+    // Day 2: morning drive 08–10h, afternoon rest
+    // Day 3: short drive 07–08h, rest
+    const base = new Date(2026, 4, 1, 0, 0); // 1 May 2026
+    for (let day = 0; day < 3; day++) {
+      for (let h = 0; h < 24; h++) {
+        for (let m = 0; m < 60; m += 5) {
+          const t = new Date(base.getTime() + (day*86400 + h*3600 + m*60)*1000);
+          const driving = (day===1 && h>=8 && h<=10) || (day===2 && h===7);
+          let v, soc;
+          if (driving) {
+            v = +(14.1 + Math.random()*0.6).toFixed(2);
+            soc = Math.round(75 + Math.random()*8);
+          } else {
+            // gentle overnight drift: start ~80%, drift ~-0.3%/h
+            const baseSOC = 80 - day*2 - h*0.15;
+            soc = Math.round(Math.max(60, baseSOC + (Math.random()-0.5)*1.5));
+            v = +(12.55 + (soc-65)*0.004 + (Math.random()-0.5)*0.03).toFixed(3);
+          }
+          const temp = +(16 + Math.random()*6 + (h>=12&&h<=16?3:0)).toFixed(1);
+          const ts = `${t.getDate()}/${MON[t.getMonth()+1]}/${t.getFullYear()} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+          rows.push([ts, v, soc, temp]);
+        }
+      }
+    }
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'BatteryData');
+    XLSX.writeFile(wb, 'battery_check_example.xls');
+  },
 
   closeDayDetail() {
     document.getElementById('dayModal').style.display = 'none';
