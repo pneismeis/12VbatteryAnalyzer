@@ -1274,14 +1274,14 @@ const App = {
             self._zoomTimer = setTimeout(() => {
               if (!xaxis || xaxis.min == null || xaxis.max == null) return;
               const {src, label} = resolveSource(xaxis.min, xaxis.max);
-              self.charts.main.updateSeries(buildSeries(src), false);
+              self.charts.main.updateOptions({ series: buildSeries(src), xaxis: { min: xaxis.min, max: xaxis.max } }, false, false);
               document.getElementById('chartSubtitle').textContent = label;
             }, 50);
           },
           beforeResetZoom() {
             clearTimeout(self._zoomTimer);
             self._zoomTimer = setTimeout(() => {
-              self.charts.main.updateSeries(buildSeries(hourly), false);
+              self.charts.main.updateOptions({ series: buildSeries(hourly), xaxis: { min: undefined, max: undefined } }, false, false);
               document.getElementById('chartSubtitle').textContent = defaultSubtitle;
             }, 50);
           },
@@ -2575,7 +2575,7 @@ const App = {
             self._entladeZoomTimer = setTimeout(() => {
               if (!xaxis || xaxis.min == null || xaxis.max == null) return;
               const {src, label} = resolveIdle(xaxis.min, xaxis.max);
-              self.charts.entlade.updateSeries(buildSeries(src), false);
+              self.charts.entlade.updateOptions({ series: buildSeries(src), xaxis: { min: xaxis.min, max: xaxis.max } }, false, false);
               reapplyVisibility();
               document.getElementById('entladeSubtitle').textContent = label;
             }, 50);
@@ -2583,7 +2583,7 @@ const App = {
           beforeResetZoom() {
             clearTimeout(self._entladeZoomTimer);
             self._entladeZoomTimer = setTimeout(() => {
-              self.charts.entlade.updateSeries(buildSeries(idleHourly), false);
+              self.charts.entlade.updateOptions({ series: buildSeries(idleHourly), xaxis: { min: undefined, max: undefined } }, false, false);
               reapplyVisibility();
               document.getElementById('entladeSubtitle').textContent = defaultLabel;
             }, 50);
