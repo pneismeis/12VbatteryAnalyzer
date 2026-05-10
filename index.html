@@ -1476,10 +1476,25 @@ const App = {
 
     const hourLabels = Array.from({length:24}, (_,i) => `${String(i).padStart(2,'0')}:00`);
 
+    // Linear interpolation across null gaps (hours always driven = no idle data)
+    function fillNulls(arr) {
+      const out = arr.map(v => v); // copy
+      for (let i = 0; i < out.length; i++) {
+        if (out[i] !== null) continue;
+        let lo = i - 1, hi = i + 1;
+        while (hi < out.length && out[hi] === null) hi++;
+        if (lo >= 0 && hi < out.length)
+          out[i] = round(out[lo] + (out[hi] - out[lo]) * (i - lo) / (hi - lo), 3);
+        else if (lo >= 0) out[i] = out[lo];
+        else if (hi < out.length) out[i] = out[hi];
+      }
+      return out;
+    }
+
     const vSeries   = DOW_DE.map((name,d) => ({ name, color: DOW_COLORS[d],
-      data: wd[d].map(b => b.count ? round(b.vSum/b.count, 3) : null) }));
+      data: fillNulls(wd[d].map(b => b.count ? round(b.vSum/b.count, 3) : null)) }));
     const socSeries = DOW_DE.map((name,d) => ({ name, color: DOW_COLORS[d],
-      data: wd[d].map(b => b.count ? round(b.socSum/b.count, 1) : null) }));
+      data: fillNulls(wd[d].map(b => b.count ? round(b.socSum/b.count, 1) : null)) }));
     const countSeries = DOW_DE.map((name,d) => ({ name, color: DOW_COLORS[d],
       data: wd[d].map(b => b.count) }));
 
