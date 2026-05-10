@@ -294,7 +294,8 @@
           <div style="display:flex; align-items:center; gap:16px; margin-top:14px; flex-wrap:wrap;">
             <div style="font-size:0.7rem; color:var(--text-5); display:flex; align-items:center; gap:4px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#ef4444;"></span> &lt;50%</div>
             <div style="font-size:0.7rem; color:var(--text-5); display:flex; align-items:center; gap:4px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#f59e0b;"></span> 50–70%</div>
-            <div style="font-size:0.7rem; color:var(--text-5); display:flex; align-items:center; gap:4px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#10b981;"></span> &gt;70%</div>
+            <div style="font-size:0.7rem; color:var(--text-5); display:flex; align-items:center; gap:4px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#34d399;"></span> 70–80%</div>
+            <div style="font-size:0.7rem; color:var(--text-5); display:flex; align-items:center; gap:4px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:#10b981;"></span> &gt;80%</div>
             <div style="font-size:0.7rem; color:var(--text-5); display:flex; align-items:center; gap:4px;"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;border:2px solid rgba(99,102,241,0.6);"></span> geladen</div>
           </div>
         </div>
@@ -676,6 +677,8 @@ function pearson(xs,ys){const n=xs.length;if(n<2)return 0;const mx=avg(xs),my=av
 // AGM/EFB thresholds for VW ID.3 12V battery (resting voltage only)
 const V_COLOR=v=>v>=12.8?'#10b981':v>=12.62?'#34d399':v>=12.50?'#84cc16':v>=12.37?'#f59e0b':v>=12.24?'#fb923c':v>=12.10?'#ef4444':v>=11.96?'#dc2626':'#991b1b';
 const V_LABEL=v=>v>=12.8?'Sehr gut (100%)':v>=12.62?'Gut (80%)':v>=12.50?'OK (70%)':v>=12.37?'Niedrig (60%)':v>=12.24?'Entladen (50%)':v>=12.10?'Kritisch (40%)':v>=11.96?'Tiefentladung (30%)':'Leer (<30%)';
+// SoC% → color, consistent with voltage table above
+const SOC_COLOR=s=>s>=80?'#10b981':s>=70?'#34d399':s>=60?'#84cc16':s>=50?'#f59e0b':s>=40?'#fb923c':s>=30?'#ef4444':'#dc2626';
 
 // ─── App ──────────────────────────────────────────────────────────────────
 const App = {
@@ -850,7 +853,7 @@ const App = {
   renderStats(data) {
     const s = data.summary;
     const d = this.computeDiagnose(data);
-    const socColor = s.socEnd > 70 ? '#10b981' : s.socEnd > 50 ? '#f59e0b' : '#ef4444';
+    const socColor = SOC_COLOR(s.socEnd);
     const deltaSign = s.socDelta >= 0 ? '+' : '';
     const deltaClass = s.socDelta >= 0 ? 'badge-up' : 'badge-down';
     const voltage = s.voltageIdleAvg;
@@ -918,7 +921,7 @@ const App = {
 
     const drainRatePerDay = idleDays.reduce((sum, d) => sum + (d.socStart - d.socEnd), 0) / idleDays.length;
     const lastSoC = daily[daily.length - 1].socEnd;
-    const daysTo50 = drainRatePerDay > 0 ? Math.round((lastSoC - 50) / drainRatePerDay) : null;
+    const daysTo50 = drainRatePerDay > 0 ? Math.round((lastSoC - 50) / drainRatePerDay) : null; // target 50% = Entladen-Schwelle
 
     banner.style.display = 'block';
     const color = daysTo50 === null ? 'var(--text-5)' : daysTo50 <= 14 ? '#ef4444' : daysTo50 <= 30 ? '#f59e0b' : '#10b981';
@@ -1063,7 +1066,7 @@ const App = {
 
       if (dayData) {
         const soc = dayData.socEnd;
-        const bg = soc > 70 ? socColor(soc, 70, 100, '#10b981') : soc > 50 ? socColor(soc, 50, 70, '#f59e0b') : '#ef4444';
+        const bg = socColor(soc, soc >= 80 ? 80 : soc >= 60 ? 60 : 0, soc >= 80 ? 100 : soc >= 60 ? 80 : 60, SOC_COLOR(soc));
         cell.style.cssText = `background:${bg};`;
         if (dayData.charged) cell.classList.add('charged');
         cell.textContent = d;
@@ -1141,7 +1144,7 @@ const App = {
       const socDelta = d.socEnd - d.socStart;
       const deltaStr = (socDelta >= 0 ? '+' : '') + socDelta.toFixed(1) + '%';
       const deltaColor = socDelta >= 0 ? '#10b981' : '#f87171';
-      const endSocColor = d.socEnd > 70 ? '#10b981' : d.socEnd > 50 ? '#f59e0b' : '#ef4444';
+      const endSocColor = SOC_COLOR(d.socEnd);
       const vColor = V_COLOR(d.vIdleAvg);
       const [, mm, dd] = d.date.split('-');
       const ranges = toRanges(drivingByDay[d.date] || []);
@@ -1158,7 +1161,7 @@ const App = {
           <span style="color:${deltaColor}; font-size:0.78rem; margin-left:4px;">(${deltaStr})</span>
         </td>
         <td style="color:var(--text-4);">
-          <span style="color:${d.socMin < 50 ? '#ef4444' : 'var(--text-5)'}">${d.socMin.toFixed(0)}</span>–<span>${d.socMax.toFixed(0)}%</span>
+          <span style="color:${SOC_COLOR(d.socMin)}">${d.socMin.toFixed(0)}</span>–<span>${d.socMax.toFixed(0)}%</span>
         </td>
         <td style="color:${vColor}; font-family:monospace; font-size:0.85rem;">${d.vIdleAvg.toFixed(3)} V</td>
         <td style="color:#f97316;">${d.tempAvg.toFixed(1)}<span style="color:var(--text-6); font-size:0.78rem;"> °C</span></td>
@@ -1632,7 +1635,7 @@ const App = {
         <td>
           <span style="color:var(--text-4);">${d.socStart}%</span>
           <span style="color:var(--text-6);margin:0 4px;">→</span>
-          <span style="color:${d.socEnd>70?'#10b981':d.socEnd>50?'#f59e0b':'#ef4444'};font-weight:600;">${d.socEnd}%</span>
+          <span style="color:${SOC_COLOR(d.socEnd)};font-weight:600;">${d.socEnd}%</span>
         </td>
         <td style="color:${deltaColor};font-weight:600;">${socDelta>=0?'+':''}${socDelta}%</td>
         <td style="font-family:monospace;color:${V_COLOR(d.vIdleAvg)};">${d.vIdleAvg.toFixed(3)}V</td>
@@ -1890,9 +1893,9 @@ const App = {
       tr.innerHTML = `
         <td style="font-weight:600;color:var(--text-2);">${m.label}</td>
         <td style="color:var(--text-3);">${s.socStart}%</td>
-        <td style="color:${s.socEnd>70?'#10b981':s.socEnd>50?'#f59e0b':'#ef4444'}; font-weight:600;">${s.socEnd}%</td>
+        <td style="color:${SOC_COLOR(s.socEnd)}; font-weight:600;">${s.socEnd}%</td>
         <td style="color:${dColor};font-weight:600;">${dSign}${delta}%</td>
-        <td style="color:${s.socMin<50?'#ef4444':'var(--text-4)'}">${s.socMin}%</td>
+        <td style="color:${SOC_COLOR(s.socMin)}">${s.socMin}%</td>
         <td style="color:#a855f7;font-family:monospace;">${s.voltageIdleAvg.toFixed(3)}V</td>
         <td style="color:#f97316;">${s.tempAvg.toFixed(1)}°C</td>
         <td>${s.chargingDays} / ${s.daysRecorded}</td>
