@@ -1640,9 +1640,10 @@ const App = {
     const DOW_DE = ['Mo','Di','Mi','Do','Fr','Sa','So'];
     const DOW_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#a855f7','#f97316','#ec4899'];
 
-    // Use finest available resolution: subHourly (10-min) → hourly (60-min)
-    const src = data.subHourly || data.hourly;
-    const bucketMins = data.subHourly ? 10 : 60;
+    // Use finest available resolution: readings (1-min) → subHourly (10-min) → hourly (60-min)
+    const src = data.readings || data.subHourly || data.hourly;
+    const isRaw = !!data.readings;
+    const bucketMins = data.readings ? 1 : data.subHourly ? 10 : 60;
     const nBuckets = 24 * 60 / bucketMins;
     const labels = Array.from({length:nBuckets}, (_,i) => {
       const h = Math.floor(i * bucketMins / 60), m = (i * bucketMins) % 60;
@@ -1654,11 +1655,11 @@ const App = {
     // Aggregate: wd[dow][bucket] = {vSum, socSum, count}
     const wd = Array.from({length:7}, () => Array.from({length:nBuckets}, () => ({vSum:0,socSum:0,count:0})));
     src.forEach(h => {
-      if (h.vMax >= 14.0) return; // exclude driving
+      if (isRaw ? h.v >= 14.0 : h.vMax >= 14.0) return; // exclude driving
       const dt = new Date(h.ts);
       const dow = (dt.getDay() + 6) % 7; // 0=Mo … 6=So
       const bucket = Math.floor((dt.getHours() * 60 + dt.getMinutes()) / bucketMins);
-      wd[dow][bucket].vSum  += h.vAvg;
+      wd[dow][bucket].vSum  += isRaw ? h.v : h.vAvg;
       wd[dow][bucket].socSum += h.soc;
       wd[dow][bucket].count++;
     });
